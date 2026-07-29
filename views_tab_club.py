@@ -61,11 +61,6 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     "expira_en": expiracion,
                     "usado": False,
                     "creado_por": id_usuario_club,
-                    "datos_perfil": {
-                        "genero": pa_genero,
-                        "fecha_nacimiento": pa_fecha_nac.isoformat(),
-                        "cedula": pa_cedula.strip(),
-                        "telefono": pa_telefono.strip()
                     }
                 }
                 
