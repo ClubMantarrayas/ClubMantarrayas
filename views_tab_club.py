@@ -67,8 +67,9 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
                 # 5. Notificación y envío de correo
+                # Envío de correo simple de invitación / OTP
                 nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
-                asunto = f"Invitación de Registro - {nombre_club}"
+                asunto = f"Invitación / Código de Activación - {nombre_club}"
                 cuerpo = (
                     f"Hola {pa_nombre},\n\n"
                     f"Se ha generado tu pre-alta en {nombre_club} con el rol de {pa_rol}.\n\n"
@@ -76,7 +77,8 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     f"Ingresa al sistema para completar tu registro con este token y tu correo ({pa_email})."
                 )
                 
-                if enviar_correo_con_pdf(destinatario=pa_email.strip(), asunto=asunto, cuerpo_texto=cuerpo, contenido_html=None, nombre_pdf=None):
+                # Pasamos los parámetros principales sin el argumento 'cuerpo_texto'
+                if enviar_correo_con_pdf(pa_email.strip(), asunto, cuerpo):
                     st.success(f"✅ Pre-Alta creada exitosamente. Token enviado a **{pa_email}**.")
                 else:
                     st.warning(f"⚠️ Pre-Alta creada con token **{token_invitacion}**, pero no se pudo enviar el correo automático.")
