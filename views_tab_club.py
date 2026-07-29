@@ -60,7 +60,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     "rol": pa_rol,
                     "expira_en": expiracion,
                     "usado": False,
-                    "creado_por": id_usuario_club,
+                    "creado_por": id_usuario_club
                     }
                 }
                 
