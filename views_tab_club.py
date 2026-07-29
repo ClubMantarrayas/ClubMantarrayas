@@ -21,16 +21,16 @@ from pdf_memo_utility import generar_pdf_memorandum_nativo
 
 
 def render_pre_alta_atleta(supabase, id_usuario_club):
-    st.markdown("### 📩 Pre-Alta de Usuarios")
-    st.caption("Registre los datos institucionales obligatorios para generar el enlace o token de invitación.")
+    st.markdown("### 📩 Registro Directo de Atletas / Pre-Alta")
+    st.caption("Registre al nadador para incorporarlo de inmediato a la nómina operativa del club.")
 
     pa_nombre = st.text_input("Nombre Completo:", key="pa_nombre")
-    pa_email = st.text_input("Correo Electrónico:", key="pa_email")
+    pa_email = st.text_input("Correo Electrónico (Atleta / Representante):", key="pa_email")
     ROLES_DISPONIBLES_ALTA = ("Nadador", "Entrenador", "Head Coach", "Club")
     pa_rol = st.selectbox("Rol Asignado:", options=ROLES_DISPONIBLES_ALTA, key="pa_rol")
     
     if pa_rol not in ROLES_DISPONIBLES_ALTA:
-        st.error("❌ El rol seleccionado no es válido. Solo se permiten usuarios institucionales.")
+        st.error("❌ El rol seleccionado no es válido.")
         st.stop()
         
     pa_genero = st.selectbox("Género:", options=["F", "M"], format_func=lambda x: "Femenino" if x == "F" else "Masculino", key="pa_genero")
@@ -39,16 +39,29 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
     pa_cedula = st.text_input("Cédula / Documento (Opcional):", key="pa_cedula")
     pa_telefono = st.text_input("Teléfono (Opcional):", key="pa_telefono")
 
-    if st.button("🚀 Generar Invitación / Token de Pre-Alta", width="stretch", type="primary"):
+    if st.button("🚀 Registrar Atleta en la Nómina", width="stretch", type="primary"):
         if not pa_nombre or not pa_email or not pa_rol or not pa_genero or not pa_fecha_nac:
-            st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son strictly obligatorios.")
+            st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son obligatorios.")
         else:
             try:
-                # 1. Generación del token único en texto
+                # 1. ACCIÓN PRINCIPAL: Carga directa e inmediata en la tabla 'usuarios'
+                payload_usuario = {
+                    "nombre": pa_nombre.strip(),
+                    "email": pa_email.strip().lower(),
+                    "rol": pa_rol,
+                    "genero": pa_genero,
+                    "fecha_nacimiento": pa_fecha_nac.isoformat(),
+                    "cedula": pa_cedula.strip() if pa_cedula else None,
+                    "telefono": pa_telefono.strip() if pa_telefono else None
+                }
+                
+                # Inserción operativa directa en la base de datos
+                supabase.table("usuarios").insert(payload_usuario).execute()
+                
+                # 2. ACCIÓN SECUNDARIA: Generar token de invitación (Opcional para el atleta)
                 token_invitacion = secrets.token_hex(16)
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
-                # 2. Payload compatible con la tabla 'invitaciones'
                 payload_invitacion = {
                     "token": token_invitacion,
                     "nombre": pa_nombre.strip(),
@@ -61,36 +74,33 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 3. Formateo de correo en HTML (requerido por tu función)
+                # 3. Envío opcional de credenciales/token por correo
                 nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
-                asunto = f"Invitación de Registro - {nombre_club}"
+                asunto = f"Bienvenido a {nombre_club}"
                 
                 cuerpo_html = f"""
                 <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
                     <h2>¡Hola, {pa_nombre}!</h2>
-                    <p>Se ha generado tu pre-alta en <strong>{nombre_club}</strong> con el rol de <strong>{pa_rol}</strong>.</p>
-                    <p>Tu token de activación es:</p>
+                    <p>Has sido registrado en la nómina de <strong>{nombre_club}</strong> con el rol de <strong>{pa_rol}</strong>.</p>
+                    <p>Si deseas activar tu acceso al portal web, tu token de activación es:</p>
                     <div style="background-color: #f4f4f4; padding: 12px; font-weight: bold; font-size: 16px; border-radius: 5px; display: inline-block;">
                         {token_invitacion}
                     </div>
-                    <p style="margin-top: 15px;">Ingresa al sistema para completar tu registro con este token y tu correo (<code>{pa_email}</code>).</p>
                 </div>
                 """
                 
-                # 4. Invocación limpia (desempaquetando la tupla de retorno)
                 exito, msg_correo = enviar_correo_con_pdf(
                     destinatario=pa_email.strip().lower(),
                     asunto=asunto,
                     cuerpo_html=cuerpo_html
                 )
                 
-                if exito:
-                    st.success(f"✅ Pre-Alta creada exitosamente. Token enviado a **{pa_email}**.")
-                else:
-                    st.warning(f"⚠️ Pre-Alta registrada en BD con token **{token_invitacion}**, pero fallo el correo: {msg_correo}")
+                st.success(f"✅ Atleta **{pa_nombre}** registrado e incorporado a la tabla `usuarios` correctamente.")
+                if not exito:
+                    st.info(f"ℹ️ El atleta ya está en el sistema. (Aviso de correo: {msg_correo})")
                     
             except Exception as e:
-                st.error(f"Error al registrar la pre-alta: {e}")
+                st.error(f"Error al guardar el atleta en la base de datos: {e}")
                 
 def generar_zip_bd_completa(supabase):
     """
