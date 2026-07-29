@@ -24,7 +24,6 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
     st.markdown("### 📩 Pre-Alta de Usuarios")
     st.caption("Registre los datos institucionales obligatorios para generar el enlace o token de invitación.")
 
-    # Campos de entrada
     pa_nombre = st.text_input("Nombre Completo:", key="pa_nombre")
     pa_email = st.text_input("Correo Electrónico:", key="pa_email")
     ROLES_DISPONIBLES_ALTA = ("Nadador", "Entrenador", "Head Coach", "Club")
@@ -37,22 +36,19 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
     pa_genero = st.selectbox("Género:", options=["F", "M"], format_func=lambda x: "Femenino" if x == "F" else "Masculino", key="pa_genero")
     pa_fecha_nac = st.date_input("Fecha de Nacimiento:", min_value=datetime.date(1950, 1, 1), max_value=datetime.date.today(), key="pa_fecha_nac")
     
-    # Campos opcionales
     pa_cedula = st.text_input("Cédula / Documento (Opcional):", key="pa_cedula")
     pa_telefono = st.text_input("Teléfono (Opcional):", key="pa_telefono")
 
-    if st.button("🚀 Generar Invitación / Token de Pre-Alta", use_container_width=True, type="primary"):
+    if st.button("🚀 Generar Invitación / Token de Pre-Alta", width="stretch", type="primary"):
         if not pa_nombre or not pa_email or not pa_rol or not pa_genero or not pa_fecha_nac:
-            st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son estrictamente obligatorios.")
+            st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son strictly obligatorios.")
         else:
             try:
-                # 1. Generación del token único alfanumérico (usando secrets para mayor seguridad)
+                # 1. Generación del token único en texto
                 token_invitacion = secrets.token_hex(16)
-                
-                # 2. Expiración a 24 horas (en formato ISO con UTC)
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
-                # 3. Construcción del payload para Supabase
+                # 2. Payload compatible con la tabla 'invitaciones'
                 payload_invitacion = {
                     "token": token_invitacion,
                     "nombre": pa_nombre.strip(),
@@ -61,27 +57,37 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     "expira_en": expiracion,
                     "usado": False,
                     "creado_por": id_usuario_club
-                    }
+                }
                 
-                # 4. Insertar en la tabla 'invitaciones'
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 5. Notificación y envío de correo
-                # Envío de correo simple de invitación / OTP
+                # 3. Formateo de correo en HTML (requerido por tu función)
                 nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
-                asunto = f"Invitación / Código de Activación - {nombre_club}"
-                cuerpo = (
-                    f"Hola {pa_nombre},\n\n"
-                    f"Se ha generado tu pre-alta en {nombre_club} con el rol de {pa_rol}.\n\n"
-                    f"Tu token de activación es:\n{token_invitacion}\n\n"
-                    f"Ingresa al sistema para completar tu registro con este token y tu correo ({pa_email})."
+                asunto = f"Invitación de Registro - {nombre_club}"
+                
+                cuerpo_html = f"""
+                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                    <h2>¡Hola, {pa_nombre}!</h2>
+                    <p>Se ha generado tu pre-alta en <strong>{nombre_club}</strong> con el rol de <strong>{pa_rol}</strong>.</p>
+                    <p>Tu token de activación es:</p>
+                    <div style="background-color: #f4f4f4; padding: 12px; font-weight: bold; font-size: 16px; border-radius: 5px; display: inline-block;">
+                        {token_invitacion}
+                    </div>
+                    <p style="margin-top: 15px;">Ingresa al sistema para completar tu registro con este token y tu correo (<code>{pa_email}</code>).</p>
+                </div>
+                """
+                
+                # 4. Invocación limpia (desempaquetando la tupla de retorno)
+                exito, msg_correo = enviar_correo_con_pdf(
+                    destinatario=pa_email.strip().lower(),
+                    asunto=asunto,
+                    cuerpo_html=cuerpo_html
                 )
                 
-                # Pasamos los parámetros principales sin el argumento 'cuerpo_texto'
-                if enviar_correo_con_pdf(pa_email.strip(), asunto, cuerpo):
+                if exito:
                     st.success(f"✅ Pre-Alta creada exitosamente. Token enviado a **{pa_email}**.")
                 else:
-                    st.warning(f"⚠️ Pre-Alta creada con token **{token_invitacion}**, pero no se pudo enviar el correo automático.")
+                    st.warning(f"⚠️ Pre-Alta registrada en BD con token **{token_invitacion}**, pero fallo el correo: {msg_correo}")
                     
             except Exception as e:
                 st.error(f"Error al registrar la pre-alta: {e}")
