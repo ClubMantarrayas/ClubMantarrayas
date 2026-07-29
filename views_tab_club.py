@@ -62,7 +62,6 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     "usado": False,
                     "creado_por": id_usuario_club
                     }
-                }
                 
                 # 4. Insertar en la tabla 'invitaciones'
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
