@@ -1,0 +1,9 @@
+streamlit
+numpy
+matplotlib
+scipy
+supabase
+pandas
+plotly
+kaleido
+reportlab
