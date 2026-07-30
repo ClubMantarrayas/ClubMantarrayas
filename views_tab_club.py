@@ -21,11 +21,11 @@ from pdf_memo_utility import generar_pdf_memorandum_nativo
 
 
 def render_pre_alta_atleta(supabase, id_usuario_club):
-    st.markdown("### 📩 Registro Directo de Atletas / Pre-Alta")
-    st.caption("Registre al nadador para incorporarlo de inmediato a la nómina operativa del club.")
+    st.markdown("### ➕ Registro Directo de Integrantes a la Nómina")
+    st.caption("Al guardar los datos mínimos, el integrante queda registrado como ACTIVO de inmediato en la nómina operativa.")
 
     pa_nombre = st.text_input("Nombre Completo:", key="pa_nombre")
-    pa_email = st.text_input("Correo Electrónico (Atleta / Representante):", key="pa_email")
+    pa_email = st.text_input("Correo Electrónico:", key="pa_email")
     ROLES_DISPONIBLES_ALTA = ("Nadador", "Entrenador", "Head Coach", "Club")
     pa_rol = st.selectbox("Rol Asignado:", options=ROLES_DISPONIBLES_ALTA, key="pa_rol")
     
@@ -39,12 +39,12 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
     pa_cedula = st.text_input("Cédula / Documento (Opcional):", key="pa_cedula")
     pa_telefono = st.text_input("Teléfono (Opcional):", key="pa_telefono")
 
-    if st.button("🚀 Registrar Atleta en la Nómina", use_container_width=True, type="primary"):
+    if st.button("🚀 Registrar e Incorporar a la Nómina (Activo)", type="primary", use_container_width=True):
         if not pa_nombre or not pa_email or not pa_rol or not pa_genero or not pa_fecha_nac:
             st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son obligatorios.")
         else:
             try:
-                # 1. ACCIÓN PRINCIPAL: Carga directa e inmediata en la tabla 'usuarios'
+                # 1. ACCIÓN PRINCIPAL: Inserción inmediata en 'usuarios' con estatus 'Activo'
                 payload_usuario = {
                     "nombre": pa_nombre.strip(),
                     "email": pa_email.strip().lower(),
@@ -52,13 +52,13 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     "genero": pa_genero,
                     "fecha_nacimiento": pa_fecha_nac.isoformat(),
                     "cedula": pa_cedula.strip() if pa_cedula else None,
-                    "telefono": pa_telefono.strip() if pa_telefono else None
+                    "telefono": pa_telefono.strip() if pa_telefono else None,
+                    "estatus": "Activo"  # Estatus definitivo inmediato
                 }
                 
-                # Inserción operativa directa en la base de datos
                 supabase.table("usuarios").insert(payload_usuario).execute()
                 
-                # 2. ACCIÓN SECUNDARIA: Generar token de invitación
+                # 2. ACCIÓN SECUNDARIA Y OPCIONAL: Generar token de invitación voluntario para acceso web
                 token_invitacion = secrets.token_hex(16)
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
@@ -74,42 +74,33 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 3. Envío opcional de credenciales/token por correo
+                # 3. Notificación por correo informativa (opcional para el usuario)
                 nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
-                asunto = f"Bienvenido a {nombre_club}"
+                asunto = f"Bienvenido(a) a la plantilla de {nombre_club}"
                 
                 cuerpo_html = f"""
                 <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
                     <h2>¡Hola, {pa_nombre}!</h2>
-                    <p>Has sido registrado en la nómina de <strong>{nombre_club}</strong> con el rol de <strong>{pa_rol}</strong>.</p>
-                    <p>Si deseas activar tu acceso al portal web, tu token de activación es:</p>
+                    <p>Has sido registrado(a) oficialmente en la plantilla de <strong>{nombre_club}</strong> con el rol de <strong>{pa_rol}</strong>.</p>
+                    <p>Ya formas parte activa de la nómina del club. Si opcionalmente deseas crear tus credenciales para ingresar a la plataforma web, puedes usar este código de acceso:</p>
                     <div style="background-color: #f4f4f4; padding: 12px; font-weight: bold; font-size: 16px; border-radius: 5px; display: inline-block;">
                         {token_invitacion}
                     </div>
                 </div>
                 """
                 
-                # Corrección / Verificación del envío
-                resultado_envio = enviar_correo_con_pdf(
+                exito, msg_correo = enviar_correo_con_pdf(
                     destinatario=pa_email.strip().lower(),
                     asunto=asunto,
                     cuerpo_html=cuerpo_html
                 )
                 
-                # Manejo flexible de retorno (Soporta retorno tuple (bool, str) o bool único)
-                if isinstance(resultado_envio, tuple):
-                    exito, msg_correo = resultado_envio
-                else:
-                    exito, msg_correo = resultado_envio, "Correo procesado."
-
-                st.success(f"✅ Atleta **{pa_nombre}** registrado e incorporado a la tabla `usuarios` correctamente.")
+                st.success(f"✅ Integrante **{pa_nombre}** registrado como **ACTIVO** e incorporado a la nómina del club.")
                 if not exito:
-                    st.warning(f"⚠️ El atleta fue registrado en BD, pero falló el envío del correo: {msg_correo}")
-                else:
-                    st.success("📩 Correo con token enviado con éxito.")
+                    st.info(f"ℹ️ Registro en base de datos completado correctamente. (Aviso SMTP: {msg_correo})")
                     
             except Exception as e:
-                st.error(f"Error al guardar el atleta en la base de datos: {e}")
+                st.error(f"Error al guardar el usuario en la base de datos: {e}")
 
 
 def generar_zip_bd_completa(supabase):
