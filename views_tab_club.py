@@ -522,9 +522,12 @@ def renderizar_tab_club():
                 render_pre_alta_atleta(supabase, id_usuario_club)
             else:
                 st.warning("Error de sesión: No se identificó el usuario emisor.")
-
+        ROLES_PLANTILLA_CLUB = ["Nadador", "Entrenador", "Head Coach", "Club"]
         try:
-            res_todos = supabase.table("usuarios").select("id, nombre, email, usuario, rol, estatus, fecha_nacimiento, cedula, telefono").execute()
+            res_todos = supabase.table("usuarios")\
+                .select("id, nombre, email, usuario, rol, estatus, fecha_nacimiento, cedula, telefono")\
+                .in_("rol", ROLES_PLANTILLA_CLUB)\
+                .execute()
             df_todos_usuarios = pd.DataFrame(res_todos.data) if res_todos.data else pd.DataFrame()
         except Exception as e:
             st.error(f"Error al cargar usuarios: {e}")
