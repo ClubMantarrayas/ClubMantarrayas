@@ -102,6 +102,49 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     
             except Exception as e:
                 st.error(f"Error al guardar el usuario en la base de datos: {e}")
+
+    # --- NUEVA SECCIÓN: CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
+    st.markdown("---")
+    with st.expander("🔑 **Consultar y Reenviar Tokens de Acceso Web**", expanded=False):
+        try:
+            res_inv = supabase.table("invitaciones").select("*").eq("usado", False).execute()
+            df_inv = pd.DataFrame(res_inv.data) if res_inv.data else pd.DataFrame()
+            
+            if df_inv.empty:
+                st.info("No hay tokens de acceso web pendientes o sin usar.")
+            else:
+                st.caption("A continuación se muestran las invitaciones activas pendientes por canjear:")
+                for idx, row in df_inv.iterrows():
+                    c_inv1, c_inv2, c_inv3 = st.columns([2, 2, 1])
+                    with c_inv1:
+                        st.write(f"**{row.get('nombre', 'Sin Nombre')}** ({row.get('rol', 'Sin Rol')})")
+                        st.caption(f"Email: {row.get('email', 'N/A')}")
+                    with c_inv2:
+                        st.code(row.get('token', ''), language=None)
+                    with c_inv3:
+                        if st.button("📩 Reenviar", key=f"btn_reenviar_{row.get('id', idx)}"):
+                            nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
+                            asunto = f"Código de Acceso Web - {nombre_club}"
+                            cuerpo_html = f"""
+                            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                                <h2>¡Hola, {row.get('nombre')}!</h2>
+                                <p>Tu código de acceso web para el sistema de <strong>{nombre_club}</strong> es:</p>
+                                <div style="background-color: #f4f4f4; padding: 12px; font-weight: bold; font-size: 16px; border-radius: 5px; display: inline-block;">
+                                    {row.get('token')}
+                                </div>
+                            </div>
+                            """
+                            exito, msg = enviar_correo_con_pdf(
+                                destinatario=row.get('email'),
+                                asunto=asunto,
+                                cuerpo_html=cuerpo_html
+                            )
+                            if exito:
+                                st.success("📩 Reenviado!")
+                            else:
+                                st.error(f"Error: {msg}")
+        except Exception as e:
+            st.error(f"Error al consultar tokens: {e}")
                 
 def generar_zip_bd_completa(supabase):
     """Exporta todas las tablas clave del club en archivos CSV dentro de un contenedor ZIP."""
