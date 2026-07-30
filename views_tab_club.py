@@ -39,7 +39,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
     pa_cedula = st.text_input("Cédula / Documento (Opcional):", key="pa_cedula")
     pa_telefono = st.text_input("Teléfono (Opcional):", key="pa_telefono")
 
-    if st.button("🚀 Registrar Atleta en la Nómina", width="stretch", type="primary"):
+    if st.button("🚀 Registrar Atleta en la Nómina", use_container_width=True, type="primary"):
         if not pa_nombre or not pa_email or not pa_rol or not pa_genero or not pa_fecha_nac:
             st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son obligatorios.")
         else:
@@ -58,7 +58,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 # Inserción operativa directa en la base de datos
                 supabase.table("usuarios").insert(payload_usuario).execute()
                 
-                # 2. ACCIÓN SECUNDARIA: Generar token de invitación (Opcional para el atleta)
+                # 2. ACCIÓN SECUNDARIA: Generar token de invitación
                 token_invitacion = secrets.token_hex(16)
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
@@ -89,24 +89,32 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 </div>
                 """
                 
-                exito, msg_correo = enviar_correo_con_pdf(
+                # Corrección / Verificación del envío
+                resultado_envio = enviar_correo_con_pdf(
                     destinatario=pa_email.strip().lower(),
                     asunto=asunto,
                     cuerpo_html=cuerpo_html
                 )
                 
+                # Manejo flexible de retorno (Soporta retorno tuple (bool, str) o bool único)
+                if isinstance(resultado_envio, tuple):
+                    exito, msg_correo = resultado_envio
+                else:
+                    exito, msg_correo = resultado_envio, "Correo procesado."
+
                 st.success(f"✅ Atleta **{pa_nombre}** registrado e incorporado a la tabla `usuarios` correctamente.")
                 if not exito:
-                    st.info(f"ℹ️ El atleta ya está en el sistema. (Aviso de correo: {msg_correo})")
+                    st.warning(f"⚠️ El atleta fue registrado en BD, pero falló el envío del correo: {msg_correo}")
+                else:
+                    st.success("📩 Correo con token enviado con éxito.")
                     
             except Exception as e:
                 st.error(f"Error al guardar el atleta en la base de datos: {e}")
-                
+
+
 def generar_zip_bd_completa(supabase):
-    """
-    Exporta todas las tablas clave del club en archivos CSV dentro de un contenedor ZIP.
-    """
-    tablas = ["usuarios", "invitaciones", "control_pagos", "tiempos", "asistencias", "documentos_oficiales"]
+    """Exporta todas las tablas clave del club en archivos CSV dentro de un contenedor ZIP."""
+    tablas = ["usuarios", "invitaciones", "control_pagos", "marcas_historicas", "bitacora_entrenamientos", "documentos_oficiales"]
     buffer = io.BytesIO()
     
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -125,15 +133,13 @@ def generar_zip_bd_completa(supabase):
 
 
 def generar_expediente_atleta_zip(supabase, atleta_id, nombre_atleta):
-    """
-    Genera el paquete completo de datos de un atleta específico para traslado o archivo personal.
-    """
+    """Genera el paquete completo de datos de un atleta específico para traslado o archivo personal."""
     buffer = io.BytesIO()
     tablas_atleta = [
         ("perfil_usuario", "usuarios", "id"),
         ("historial_pagos", "control_pagos", "usuario_id"),
-        ("historial_tiempos", "tiempos", "usuario_id"),
-        ("control_asistencias", "asistencias", "usuario_id")
+        ("historial_marcas", "marcas_historicas", "usuario_id"),
+        ("bitacora_entrenamientos", "bitacora_entrenamientos", "atleta_id")
     ]
     
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -150,13 +156,13 @@ def generar_expediente_atleta_zip(supabase, atleta_id, nombre_atleta):
     buffer.seek(0)
     return buffer
 
+
 def obtener_logo_base64(supabase):
     """Obtiene el logo institucional en Base64 desde Supabase Storage."""
     try:
         data = supabase.storage.from_("Archivos").download("logo_club.png")
         return f"data:image/png;base64,{base64.b64encode(data).decode()}"
     except Exception:
-        # Logo de respaldo transparente en base64
         return "data:image/png;base64,iVBORw0KGgoAAAANSU2EUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 
 
@@ -171,16 +177,16 @@ def obtener_siguiente_correlativo(supabase, tipo_documento):
     prefix = prefix_map.get(tipo_documento, "DOC")
     
     try:
-        res = supabase.table("comunicaciones")\
-            .select("correlativo")\
+        res = supabase.table("documentos_oficiales")\
+            .select("codigo_correlativo")\
             .eq("tipo_documento", tipo_documento)\
-            .ilike("correlativo", f"{prefix}-{anio_actual}-%")\
-            .order("id", desc=True)\
+            .ilike("codigo_correlativo", f"{prefix}-{anio_actual}-%")\
+            .order("created_at", desc=True)\
             .limit(1)\
             .execute()
         
         if res.data:
-            ultimo_correlativo = res.data[0]["correlativo"]
+            ultimo_correlativo = res.data[0]["codigo_correlativo"]
             num_secuencia = int(ultimo_correlativo.split("-")[-1]) + 1
         else:
             num_secuencia = 1
@@ -206,7 +212,6 @@ def generar_html_comunicado(logo_b64, nombre_club, tipo_doc, correlativo, fecha,
         color: #2c3e50;
         box-sizing: border-box;
     ">
-        <!-- ENCABEZADO CON LOGO INSTITUCIONAL -->
         <table style="width: 100%; border-bottom: 2px solid #003366; padding-bottom: 10px; margin-bottom: 15px;">
             <tr>
                 <td style="width: 20%; vertical-align: middle;">
@@ -219,7 +224,6 @@ def generar_html_comunicado(logo_b64, nombre_club, tipo_doc, correlativo, fecha,
             </tr>
         </table>
 
-        <!-- METADATOS Y TÍTULO -->
         <div style="text-align: center; margin-bottom: 15px;">
             <h3 style="margin: 0; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: #111;">{tipo_doc}</h3>
             <span style="font-size: 12px; font-weight: bold; color: #d9534f;">N° {correlativo}</span>
@@ -246,12 +250,10 @@ def generar_html_comunicado(logo_b64, nombre_club, tipo_doc, correlativo, fecha,
 
         <hr style="border: None; border-top: 1px solid #eee; margin: 10px 0;">
 
-        <!-- CUERPO -->
         <div style="font-size: 12px; line-height: 1.6; text-align: justify; min-height: 180px; margin-bottom: 30px;">
             {cuerpo_formateado}
         </div>
 
-        <!-- FIRMA -->
         <table style="width: 100%; margin-top: 40px; text-align: center; font-size: 11px;">
             <tr>
                 <td style="width: 30%;"></td>
@@ -281,7 +283,6 @@ def render_comunicados_y_correspondencia(supabase, id_usuario_club):
     st.markdown("<h4 style='margin:0; padding:0;'>📨 Emisión y Despacho con PDF Adjunto</h4>", unsafe_allow_html=True)
     st.caption("Genere comunicados con correlativo automático, vista previa y despacho en PDF al correo del destinatario.")
 
-    # 1. PLANTILLA Y CORRELATIVO CONSECUTIVO
     col_sel1, col_sel2 = st.columns([1.5, 1])
     with col_sel1:
         tipo_plantilla = st.selectbox(
@@ -307,7 +308,7 @@ def render_comunicados_y_correspondencia(supabase, id_usuario_club):
         elif tipo_plantilla == "Circular":
             destinatario = st.text_input("Dirigido a:", value="A Toda la Comunidad de Atletas y Representantes", key="com_dest")
             remitente = st.text_input("Emisor:", placeholder="Ej: Coordinación de Deportes", key="com_rem")
-        else: # Correspondencia
+        else:
             destinatario = st.text_input("Institución / Destinatario Ext.:", placeholder="Ej: FEVEDA / Asociación de Deportes", key="com_dest")
             remitente = st.text_input("Remitente Oficial:", placeholder="Ej: Presidencia del Club", key="com_rem")
 
@@ -327,7 +328,6 @@ def render_comunicados_y_correspondencia(supabase, id_usuario_club):
             key=f"com_cuerpo_{tipo_plantilla.lower()}"
         )
 
-    # 2. VISTA PREVIA HTML
     nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
     logo_b64 = obtener_logo_base64(supabase)
     html_documento = generar_html_comunicado(
@@ -339,59 +339,52 @@ def render_comunicados_y_correspondencia(supabase, id_usuario_club):
         st.markdown("##### 👁️ Vista Previa del Documento")
         st.components.v1.html(html_documento, height=430, scrolling=True)
 
-    # 3. REGISTRO EN BD Y DESPACHO VÍA PDF
     st.markdown("---")
     if st.button(f"📄 Registrar en BD y Enviar PDF de {tipo_plantilla}", type="primary", use_container_width=True):
         if not correlativo or not destinatario or not asunto or not cuerpo:
             st.error("⚠️ Debe completar los campos obligatorios del documento antes de despachar.")
         else:
             try:
-                # A. Guardar en Supabase para mantener el histórico inmutable
+                # Guardar en la tabla mapeada del schema ('documentos_oficiales')
                 payload = {
+                    "codigo_correlativo": correlativo.strip(),
                     "tipo_documento": tipo_plantilla,
-                    "correlativo": correlativo.strip(),
-                    "fecha": fecha_emision.isoformat(),
-                    "destinatario": destinatario.strip(),
-                    "remitente": remitente.strip(),
+                    "titulo": asunto.strip(),
+                    "para_destinatario": destinatario.strip(),
+                    "de_emisor": remitente.strip(),
+                    "fecha_emision": fecha_emision.isoformat(),
                     "asunto": asunto.strip(),
-                    "cuerpo": cuerpo.strip(),
-                    "email_destino": email_destino.strip() if email_destino else None,
-                    "html_renderizado": html_documento,
-                    "creado_por": id_usuario_club
+                    "contenido_json": {"cuerpo": cuerpo.strip(), "html": html_documento},
+                    "clausulas_texto": cuerpo.strip(),
+                    "estatus": "Enviado",
+                    "creado_por": str(id_usuario_club)
                 }
                 
-                supabase.table("comunicaciones").insert(payload).execute()
+                supabase.table("documentos_oficiales").insert(payload).execute()
                 st.success(f"💾 Documento **{correlativo}** registrado con éxito en la Base de Datos.")
 
-                # B. Envío por correo adjuntando el PDF generado desde el HTML
+                # Envío por correo con la función unificada
                 if email_destino.strip():
                     asunto_correo = f"[{tipo_plantilla}] {correlativo} - {asunto}"
-                    nombre_archivo_pdf = f"{correlativo}.pdf"
-                    cuerpo_mensaje = f"Estimado(a),\n\nAdjunto a este correo encontrará el documento oficial {tipo_plantilla} N° {correlativo} emitido por {nombre_club}.\n\nSaludos cordiales."
                     
-                    # Llamada a la función importada
-                    exito_envio = enviar_correo_con_PDF(
+                    exito_envio = enviar_correo_con_pdf(
                         destinatario=email_destino.strip(),
                         asunto=asunto_correo,
-                        cuerpo_texto=cuerpo_mensaje,
-                        contenido_html=html_documento,
-                        nombre_pdf=nombre_archivo_pdf
+                        cuerpo_html=html_documento
                     )
 
                     if exito_envio:
-                        st.success(f"📩 Documento enviado exitosamente en PDF a **{email_destino}**.")
+                        st.success(f"📩 Documento enviado exitosamente a **{email_destino}**.")
                     else:
-                        st.warning("⚠️ El documento fue registrado en la BD, pero ocurrió un detalle al generar o despachar el PDF adjunto.")
+                        st.warning("⚠️ El documento fue registrado en BD, pero falló el envío del correo.")
                 else:
-                    st.info("ℹ️ No se especificó correo electrónico de destino; el documento quedó registrado exclusivamente en el histórico de la BD.")
+                    st.info("ℹ️ No se especificó correo electrónico de destino; registrado solo en la BD.")
                 
             except Exception as e:
                 st.error(f"Error al procesar la comunicación: {e}")
 
+
 def renderizar_tab_club():
-    """
-    Pestaña principal de administración y gobernanza del club.
-    """
     st.markdown("### 🏛️ Centro de Control Administrativo")
     st.caption("Gestión financiera, gobernanza de nóminas, correspondencia y respaldos de base de datos.")
     st.markdown("---")
@@ -408,12 +401,9 @@ def renderizar_tab_club():
         "💾 Respaldos de BD"
     ])
 
-    # =========================================================================
-    # SUB-PESTAÑA 1: CONTROL FINANCIERO Y PAGOS
-    # =========================================================================
+    # 1. CONTROL FINANCIERO Y PAGOS
     with subtab_pagos:
         st.markdown("### 💰 Control de Cuotas y Solvencias")
-        
         col_temp, col_mes, col_estado, col_buscar = st.columns([1, 1, 1, 2])
         año_actual = datetime.date.today().year
         mes_actual = datetime.date.today().month
@@ -428,10 +418,7 @@ def renderizar_tab_club():
             busqueda_texto = st.text_input("🔍 Buscar Atleta:", placeholder="Nombre o usuario...", key="club_busq")
 
         try:
-            res_usuarios = supabase.table("usuarios")\
-                .select("id, nombre, usuario, estatus, email")\
-                .eq("rol", "Nadador")\
-                .execute()
+            res_usuarios = supabase.table("usuarios").select("id, nombre, usuario, estatus, email").eq("rol", "Nadador").execute()
             df_nadadores = pd.DataFrame(res_usuarios.data) if res_usuarios.data else pd.DataFrame()
         except Exception as e:
             st.error(f"Error al cargar lista de nadadores: {e}")
@@ -441,10 +428,7 @@ def renderizar_tab_club():
             st.warning("No hay nadadores registrados en la base de datos.")
         else:
             try:
-                res_pagos = supabase.table("control_pagos")\
-                    .select("*")\
-                    .eq("temporada", temporada_sel)\
-                    .execute()
+                res_pagos = supabase.table("control_pagos").select("*").eq("temporada", temporada_sel).execute()
                 df_pagos = pd.DataFrame(res_pagos.data) if res_pagos.data else pd.DataFrame()
             except Exception:
                 df_pagos = pd.DataFrame()
@@ -533,37 +517,28 @@ def renderizar_tab_club():
                         except Exception as e:
                             st.error(f"Error al registrar pago: {e}")
 
-    # =========================================================================
-    # SUB-PESTAÑA 2: PLANTILLA Y NÓMINAS
-    # =========================================================================
+    # 2. PLANTILLA Y NÓMINAS
     with subtab_atletas:
         st.markdown("### 👥 Administración de Nómina de Usuarios")
         st.caption("Control institucional de integrantes, edición de perfiles y consulta de nóminas.")
 
         id_usuario_club = st.session_state.get("usuario_id")
 
-        # --- 1. MÓDULO DE PRE-ALTA DE INTEGRANTES ---
         with st.expander("➕ **1. Pre-Alta de Integrantes (Emisión OTP)**", expanded=False):
             if id_usuario_club and supabase:
                 render_pre_alta_atleta(supabase, id_usuario_club)
             else:
                 st.warning("Error de sesión: No se identificó el usuario emisor.")
 
-        # Cargar todos los usuarios del club para el formulario de modificación
         try:
-            res_todos = supabase.table("usuarios")\
-                .select("id, nombre, email, usuario, rol, estatus, fecha_nacimiento, cedula, telefono")\
-                .execute()
+            res_todos = supabase.table("usuarios").select("id, nombre, email, usuario, rol, estatus, fecha_nacimiento, cedula, telefono").execute()
             df_todos_usuarios = pd.DataFrame(res_todos.data) if res_todos.data else pd.DataFrame()
         except Exception as e:
             st.error(f"Error al cargar usuarios: {e}")
             df_todos_usuarios = pd.DataFrame()
 
-        # --- 2. FORMULARIO DE EDICIÓN DE FICHA / ESTATUS (UBICADO ARRIBA) ---
         if not df_todos_usuarios.empty:
             with st.expander("⚙️ **2. Actualizar Estatus y Ficha de Usuario (Cualquier Rol)**", expanded=False):
-                st.write("Seleccione un usuario registrado para modificar sus datos personales, rol o estatus.")
-                
                 usuario_mod_id = st.selectbox(
                     "Seleccionar Usuario a Modificar:",
                     options=df_todos_usuarios["id"].tolist(),
@@ -591,10 +566,6 @@ def renderizar_tab_club():
                         rol_act = row_user.get("rol", "Nadador")
                         idx_rol = roles_disp.index(rol_act) if rol_act in roles_disp else 0
                         edit_rol = st.selectbox("Rol Institucional:", roles_disp, index=idx_rol)
-                        
-                        if edit_rol not in roles_disp:
-                            st.error("❌ El rol seleccionado no es válido.")
-                            st.stop()
 
                     with c_e2:
                         edit_telefono = st.text_input("Teléfono:", value=str(row_user.get("telefono", "") if pd.notna(row_user.get("telefono")) else ""))
@@ -626,10 +597,8 @@ def renderizar_tab_club():
 
         st.markdown("---")
 
-        # --- 3. SECCIÓN DE NÓMINAS DIVIDIDAS ---
         tab_nomina_nadadores, tab_nomina_tecnica = st.tabs(["🏊 NÓMINA NADADORES", "📋 NÓMINA TÉCNICA"])
 
-        # NÓMINA NADADORES
         with tab_nomina_nadadores:
             df_nadadores_nom = df_todos_usuarios[df_todos_usuarios["rol"] == "Nadador"].copy() if not df_todos_usuarios.empty else pd.DataFrame()
             
@@ -674,7 +643,6 @@ def renderizar_tab_club():
                 df_nad_disp.columns = ["Atleta", "Cédula", "Correo Electrónico", "Teléfono", "Fecha Nac.", "Categoría", "Estatus"]
                 st.dataframe(df_nad_disp, use_container_width=True, hide_index=True)
 
-        # NÓMINA TÉCNICA (ENTRENADORES Y HEAD COACH)
         with tab_nomina_tecnica:
             roles_tecnicos = ["Entrenador", "Head Coach", "Club"]
             df_tecnica = df_todos_usuarios[df_todos_usuarios["rol"].isin(roles_tecnicos)].copy() if not df_todos_usuarios.empty else pd.DataFrame()
@@ -687,22 +655,17 @@ def renderizar_tab_club():
                 df_tec_disp.columns = ["Nombre y Apellido", "Rol Técnico", "Cédula", "Correo Electrónico", "Teléfono", "Estatus"]
                 st.dataframe(df_tec_disp, use_container_width=True, hide_index=True)
 
-# =========================================================================
-    # SUB-PESTAÑA 3: COMUNICADOS Y CORRESPONDENCIA
-    # =========================================================================
+    # 3. COMUNICADOS Y CORRESPONDENCIA
     with subtab_comunicacion:
         render_comunicados_y_correspondencia(supabase, id_usuario_club)
 
-    # =========================================================================
-    # SUB-PESTAÑA 4: RESPALDOS DE BASE DE DATOS (MÓDULO DE SEGURIDAD)
-    # =========================================================================
+    # 4. RESPALDOS DE BASE DE DATOS
     with subtab_respaldos:
         st.markdown("### 💾 Respaldo y Portabilidad de Datos del Club")
         st.caption("Herramientas autónomas de backup por tabla individual, archivo ZIP global y expedientes individuales de traslado.")
 
         col_r1, col_r2, col_r3 = st.columns(3)
 
-        # MODALIDAD 1: TABLA INDIVIDUAL DE SUPABASE
         with col_r1:
             with st.container(border=True):
                 st.markdown("##### 📄 1. Exportar Tabla Individual")
@@ -710,7 +673,7 @@ def renderizar_tab_club():
                 
                 tabla_sel_resp = st.selectbox(
                     "Seleccionar Tabla:",
-                    ["usuarios", "invitaciones", "control_pagos", "tiempos", "asistencias", "documentos_oficiales"],
+                    ["usuarios", "invitaciones", "control_pagos", "marcas_historicas", "bitacora_entrenamientos", "documentos_oficiales"],
                     key="select_tabla_individual_resp"
                 )
                 
@@ -731,7 +694,6 @@ def renderizar_tab_club():
                     except Exception as e:
                         st.error(f"Error al consultar tabla: {e}")
 
-        # MODALIDAD 2: ARCHIVO ZIP COMPLETO DE LA BASE DE DATOS
         with col_r2:
             with st.container(border=True):
                 st.markdown("##### 📦 2. Backup Completo (ZIP)")
@@ -749,7 +711,6 @@ def renderizar_tab_club():
                             use_container_width=True
                         )
 
-        # MODALIDAD 3: EXPEDIENTE DE TRASLADO INDIVIDUAL DEL ATLETA
         with col_r3:
             with st.container(border=True):
                 st.markdown("##### 🏊 3. Expediente del Atleta")
