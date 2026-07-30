@@ -186,3 +186,14 @@ if st.session_state["puente_validado"]:
     else:
         from views_tab_router import mostrar_vista_enrutador
         mostrar_vista_enrutador()
+# ===================================================
+# 🏁 CIERRE VISUAL GLOBAL AL PIE DE TODA LA APP
+# ===================================================
+st.markdown(
+    """
+    <div style='text-align: center; margin-top: 40px; margin-bottom: 10px; color: #94a3b8; font-size: 12px; font-weight: bold; letter-spacing: 1px;'>
+        --- FIN DE LA VISTA ---
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
