@@ -44,29 +44,36 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
             st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son obligatorios.")
         else:
             try:
+                email_limpio = pa_email.strip().lower()
+
                 # 1. ACCIÓN PRINCIPAL: Carga directa e inmediata con estatus 'Activo'
                 payload_usuario = {
                     "nombre": pa_nombre.strip(),
-                    "email": pa_email.strip().lower(),
+                    "email": email_limpio,
                     "rol": pa_rol,
                     "genero": pa_genero,
                     "fecha_nacimiento": pa_fecha_nac.isoformat(),
                     "cedula": pa_cedula.strip() if pa_cedula else None,
                     "telefono": pa_telefono.strip() if pa_telefono else None,
-                    "estatus": "Activo"  # Estatus directo activo
+                    "estatus": "Activo"
                 }
                 
-                # Inserción operativa directa
                 supabase.table("usuarios").insert(payload_usuario).execute()
                 
-                # 2. ACCIÓN SECUNDARIA: Generar token voluntario para acceso a la plataforma web
+                # 2. LIMPIEZA DE TOKENS PREVIOS: Marcar tokens anteriores sin usar como usados
+                try:
+                    supabase.table("invitaciones").update({"usado": True}).eq("email", email_limpio).eq("usado", False).execute()
+                except Exception:
+                    pass
+
+                # 3. ACCIÓN SECUNDARIA: Generar nuevo token voluntario
                 token_invitacion = secrets.token_hex(16)
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
                 payload_invitacion = {
                     "token": token_invitacion,
                     "nombre": pa_nombre.strip(),
-                    "email": pa_email.strip().lower(),
+                    "email": email_limpio,
                     "rol": pa_rol,
                     "expira_en": expiracion,
                     "usado": False,
@@ -75,7 +82,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 3. Notificación informativa
+                # 4. Notificación informativa
                 nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
                 asunto = f"Bienvenido(a) a la plantilla de {nombre_club}"
                 
@@ -91,7 +98,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 """
                 
                 exito, msg_correo = enviar_correo_con_pdf(
-                    destinatario=pa_email.strip().lower(),
+                    destinatario=email_limpio,
                     asunto=asunto,
                     cuerpo_html=cuerpo_html
                 )
@@ -103,26 +110,21 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
             except Exception as e:
                 st.error(f"Error al guardar el usuario en la base de datos: {e}")
 
-# --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
+    # --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
     st.markdown("---")
     with st.expander("🔑 **Consultar y Reenviar Tokens de Acceso Web**", expanded=False):
         try:
-            # 1. Traemos las invitaciones sin usar, ordenadas de la más reciente a la más antigua
-            res_inv = supabase.table("invitaciones")\
-                .select("*")\
-                .eq("usado", False)\
-                .order("created_at", desc=True)\
-                .execute()
-                
+            res_inv = supabase.table("invitaciones").select("*").eq("usado", False).execute()
             df_inv = pd.DataFrame(res_inv.data) if res_inv.data else pd.DataFrame()
             
             if df_inv.empty:
                 st.info("No hay tokens de acceso web pendientes o sin usar.")
             else:
-                # 2. Dejamos únicamente el ÚLTIMO token generado por cada correo electrónico
-                df_inv = df_inv.drop_duplicates(subset=["email"], keep="first")
+                # Normalizamos correos y conservamos solo el ÚLTIMO generado por persona
+                df_inv["email_norm"] = df_inv["email"].astype(str).str.strip().str.lower()
+                df_inv = df_inv.drop_duplicates(subset=["email_norm"], keep="last")
 
-                st.caption("A continuación se muestra el último token activo pendiente por canjear para cada integrante:")
+                st.caption("A continuación se muestra el token de acceso web pendiente para cada integrante:")
                 for idx, row in df_inv.iterrows():
                     c_inv1, c_inv2, c_inv3 = st.columns([2, 2, 1])
                     with c_inv1:
