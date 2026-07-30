@@ -103,17 +103,26 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
             except Exception as e:
                 st.error(f"Error al guardar el usuario en la base de datos: {e}")
 
-    # --- NUEVA SECCIÓN: CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
+# --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
     st.markdown("---")
     with st.expander("🔑 **Consultar y Reenviar Tokens de Acceso Web**", expanded=False):
         try:
-            res_inv = supabase.table("invitaciones").select("*").eq("usado", False).execute()
+            # 1. Traemos las invitaciones sin usar, ordenadas de la más reciente a la más antigua
+            res_inv = supabase.table("invitaciones")\
+                .select("*")\
+                .eq("usado", False)\
+                .order("created_at", desc=True)\
+                .execute()
+                
             df_inv = pd.DataFrame(res_inv.data) if res_inv.data else pd.DataFrame()
             
             if df_inv.empty:
                 st.info("No hay tokens de acceso web pendientes o sin usar.")
             else:
-                st.caption("A continuación se muestran las invitaciones activas pendientes por canjear:")
+                # 2. Dejamos únicamente el ÚLTIMO token generado por cada correo electrónico
+                df_inv = df_inv.drop_duplicates(subset=["email"], keep="first")
+
+                st.caption("A continuación se muestra el último token activo pendiente por canjear para cada integrante:")
                 for idx, row in df_inv.iterrows():
                     c_inv1, c_inv2, c_inv3 = st.columns([2, 2, 1])
                     with c_inv1:
