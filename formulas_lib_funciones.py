@@ -38,10 +38,11 @@ def enviar_correo_con_pdf(destinatario, asunto, cuerpo_html, pdf_bytes=None, nom
     Función principal multipropósito: Envía correos con HTML y soporte opcional para adjuntar PDF.
     """
     try:
-        remitente = st.secrets["smtp"]["email"]
-        password = st.secrets["smtp"]["password"]
-        servidor = st.secrets["smtp"]["server"]
-        puerto = st.secrets["smtp"].get("port", 587)
+        remitente = str(st.secrets["smtp"]["email"]).strip()
+        # Elimina posibles espacios en blanco introducidos al copiar/pegar
+        password = str(st.secrets["smtp"]["password"]).replace(" ", "").strip()
+        servidor = str(st.secrets["smtp"]["server"]).strip()
+        puerto = int(st.secrets["smtp"].get("port", 587))
 
         msg = MIMEMultipart()
         msg['From'] = remitente
