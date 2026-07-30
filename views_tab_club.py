@@ -366,19 +366,21 @@ def render_comunicados_y_correspondencia(supabase, id_usuario_club):
                 # Envío por correo con la función unificada
                 if email_destino.strip():
                     asunto_correo = f"[{tipo_plantilla}] {correlativo} - {asunto}"
+                    nombre_archivo_pdf = f"{correlativo}.pdf"
                     
-                    exito_envio = enviar_correo_con_pdf(
+                    # Invocación limpia alineada a la función unificada
+                    exito_envio, msg_envio = enviar_correo_con_pdf(
                         destinatario=email_destino.strip(),
                         asunto=asunto_correo,
                         cuerpo_html=html_documento
                     )
-
+                
                     if exito_envio:
                         st.success(f"📩 Documento enviado exitosamente a **{email_destino}**.")
                     else:
-                        st.warning("⚠️ El documento fue registrado en BD, pero falló el envío del correo.")
+                        st.warning(f"⚠️ Documento registrado en la BD, pero falló el correo: {msg_envio}")
                 else:
-                    st.info("ℹ️ No se especificó correo electrónico de destino; registrado solo en la BD.")
+                    st.info("ℹ️ No se especificó correo electrónico de destino; el documento quedó registrado exclusivamente en el histórico de la BD.")
                 
             except Exception as e:
                 st.error(f"Error al procesar la comunicación: {e}")
