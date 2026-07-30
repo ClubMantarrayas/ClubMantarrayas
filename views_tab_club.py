@@ -60,13 +60,13 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("usuarios").insert(payload_usuario).execute()
                 
-                # 2. LIMPIEZA DE TOKENS PREVIOS: Marcar tokens anteriores sin usar como usados
+                # 2. LIMPIEZA EN BD: Marcar tokens anteriores sin usar como USADOS
                 try:
                     supabase.table("invitaciones").update({"usado": True}).eq("email", email_limpio).eq("usado", False).execute()
                 except Exception:
                     pass
 
-                # 3. ACCIÓN SECUNDARIA: Generar nuevo token voluntario
+                # 3. ACCIÓN SECUNDARIA: Generar nuevo token único
                 token_invitacion = secrets.token_hex(16)
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
@@ -82,8 +82,8 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 4. Notificación informativa
-                nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
+                # 4. Notificación por correo
+                nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
                 asunto = f"Bienvenido(a) a la plantilla de {nombre_club}"
                 
                 cuerpo_html = f"""
@@ -110,22 +110,38 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
             except Exception as e:
                 st.error(f"Error al guardar el usuario en la base de datos: {e}")
 
-    # --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
+    # --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB (CON AUTO-LIMPIEZA DE DUPLICADOS) ---
     st.markdown("---")
     with st.expander("🔑 **Consultar y Reenviar Tokens de Acceso Web**", expanded=False):
         try:
-            res_inv = supabase.table("invitaciones").select("*").eq("usado", False).execute()
+            # Traemos invitaciones sin usar, ordenadas de la más reciente a la más antigua
+            res_inv = supabase.table("invitaciones")\
+                .select("*")\
+                .eq("usado", False)\
+                .order("creado_en", desc=True)\
+                .execute()
+                
             df_inv = pd.DataFrame(res_inv.data) if res_inv.data else pd.DataFrame()
             
             if df_inv.empty:
                 st.info("No hay tokens de acceso web pendientes o sin usar.")
             else:
-                # Normalizamos correos y conservamos solo el ÚLTIMO generado por persona
                 df_inv["email_norm"] = df_inv["email"].astype(str).str.strip().str.lower()
-                df_inv = df_inv.drop_duplicates(subset=["email_norm"], keep="last")
+                
+                # Conservamos SOLO el primer registro (el más nuevo) para cada correo
+                df_validos = df_inv.drop_duplicates(subset=["email_norm"], keep="first")
+                
+                # AUTO-LIMPIEZA EN SUPABASE: Inactivar de la BD todas las filas obsoletas
+                ids_obsoletos = df_inv[~df_inv["id"].isin(df_validos["id"])]["id"].tolist()
+                if ids_obsoletos:
+                    for id_obsoleto in ids_obsoletos:
+                        try:
+                            supabase.table("invitaciones").update({"usado": True}).eq("id", id_obsoleto).execute()
+                        except Exception:
+                            pass
 
-                st.caption("A continuación se muestra el token de acceso web pendiente para cada integrante:")
-                for idx, row in df_inv.iterrows():
+                st.caption("A continuación se muestra el único token activo y vigente para cada integrante:")
+                for idx, row in df_validos.iterrows():
                     c_inv1, c_inv2, c_inv3 = st.columns([2, 2, 1])
                     with c_inv1:
                         st.write(f"**{row.get('nombre', 'Sin Nombre')}** ({row.get('rol', 'Sin Rol')})")
@@ -134,7 +150,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                         st.code(row.get('token', ''), language=None)
                     with c_inv3:
                         if st.button("📩 Reenviar", key=f"btn_reenviar_{row.get('id', idx)}"):
-                            nombre_club = st.session_state.get("club_seleccionado", "Centro Gallego")
+                            nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
                             asunto = f"Código de Acceso Web - {nombre_club}"
                             cuerpo_html = f"""
                             <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
