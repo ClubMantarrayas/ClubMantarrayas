@@ -83,7 +83,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
                 # 4. Envío de Correo Inicial
-                nombre_club = st.session_state.get("club_seleccionado", "Sistema de Natación")
+                nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
                 asunto = f"Código de Acceso Web ({token_invitacion}) - {nombre_club}"
                 
                 cuerpo_html = f"""
@@ -193,7 +193,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     
                     with c_inv3:
                         if st.button("📩 Enviar Código", key=f"btn_enviar_{row.get('id', idx)}", width="stretch"):
-                            nombre_club = st.session_state.get("club_seleccionado", "Sistema de Natación")
+                            nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
                             token_code = row.get('token', '')
                             asunto = f"Código de Acceso Web ({token_code}) - {nombre_club}"
                             cuerpo_html = f"""
