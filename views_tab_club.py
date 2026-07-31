@@ -39,7 +39,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
     pa_cedula = st.text_input("Cédula / Documento (Opcional):", key="pa_cedula")
     pa_telefono = st.text_input("Teléfono (Opcional):", key="pa_telefono")
 
-    if st.button("🚀 Registrar e Incorporar a la Nómina (Activo)", type="primary", use_container_width=True):
+    if st.button("🚀 Registrar e Incorporar a la Nómina (Activo)", type="primary", width="stretch"):
         if not pa_nombre or not pa_email or not pa_rol or not pa_genero or not pa_fecha_nac:
             st.error("⚠️ Los 5 campos básicos (Nombre, Email, Rol, Género y Fecha de Nacimiento) son obligatorios.")
         else:
@@ -66,7 +66,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 except Exception:
                     pass
 
-                # 3. ACCIÓN SECUNDARIA: Generar nuevo token único
+                # 3. GENERAR CÓDIGO NUMÉRICO DE 6 DÍGITOS
                 token_invitacion = f"{secrets.randbelow(900000) + 100000}"
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
@@ -82,18 +82,19 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 4. Notificación por correo
-                nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
-                asunto = f"Bienvenido(a) a la plantilla de {nombre_club}"
+                # 4. NOTIFICACIÓN POR CORREO CON FORMATO DE CÓDIGO DE 6 DÍGITOS
+                nombre_club = st.session_state.get("club_seleccionado", "Sistema de Natación")
+                asunto = f"Código de Acceso Web ({token_invitacion}) - {nombre_club}"
                 
                 cuerpo_html = f"""
-                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-                    <h2>¡Hola, {pa_nombre}!</h2>
+                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee; border-radius: 8px;">
+                    <h2 style="color: #1a5276; margin-top: 0;">¡Hola, {pa_nombre}!</h2>
                     <p>Has sido registrado(a) en la plantilla oficial de <strong>{nombre_club}</strong> con el rol de <strong>{pa_rol}</strong>.</p>
-                    <p>Ya te encuentras activo(a) en la nómina del club. Si deseas activar opcionalmente tu usuario para ingresar al portal web, tu código de acceso es:</p>
-                    <div style="background-color: #f4f4f4; padding: 12px; font-weight: bold; font-size: 16px; border-radius: 5px; display: inline-block;">
+                    <p>Tu código de 6 dígitos para acceder al portal web es:</p>
+                    <div style="background-color: #f2f4f4; padding: 15px; font-weight: bold; font-size: 24px; letter-spacing: 5px; color: #2e86c1; border-radius: 6px; text-align: center; margin: 20px 0;">
                         {token_invitacion}
                     </div>
+                    <p style="font-size: 12px; color: #7f8c8d;">Este código es de uso personal y expira en 24 horas.</p>
                 </div>
                 """
                 
@@ -103,18 +104,17 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     cuerpo_html=cuerpo_html
                 )
                 
-                st.success(f"✅ Integrante **{pa_nombre}** registrado como **ACTIVO** e incorporado a la nómina del club.")
+                st.success(f"✅ Integrante **{pa_nombre}** registrado como **ACTIVO**.")
                 if not exito:
                     st.info(f"ℹ️ Registro completado en la BD. (Aviso de envío SMTP: {msg_correo})")
                     
             except Exception as e:
                 st.error(f"Error al guardar el usuario en la base de datos: {e}")
 
-    # --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB (CON AUTO-LIMPIEZA DE DUPLICADOS) ---
+    # --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
     st.markdown("---")
     with st.expander("🔑 **Consultar y Reenviar Tokens de Acceso Web**", expanded=False):
         try:
-            # Traemos invitaciones sin usar, ordenadas de la más reciente a la más antigua
             res_inv = supabase.table("invitaciones")\
                 .select("*")\
                 .eq("usado", False)\
@@ -127,11 +127,9 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 st.info("No hay tokens de acceso web pendientes o sin usar.")
             else:
                 df_inv["email_norm"] = df_inv["email"].astype(str).str.strip().str.lower()
-                
-                # Conservamos SOLO el primer registro (el más nuevo) para cada correo
                 df_validos = df_inv.drop_duplicates(subset=["email_norm"], keep="first")
                 
-                # AUTO-LIMPIEZA EN SUPABASE: Inactivar de la BD todas las filas obsoletas
+                # Inactivar tokens viejos en silencio
                 ids_obsoletos = df_inv[~df_inv["id"].isin(df_validos["id"])]["id"].tolist()
                 if ids_obsoletos:
                     for id_obsoleto in ids_obsoletos:
@@ -140,7 +138,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                         except Exception:
                             pass
 
-                st.caption("A continuación se muestra el único token activo y vigente para cada integrante:")
+                st.caption("A continuación se muestra el único código activo para cada integrante:")
                 for idx, row in df_validos.iterrows():
                     c_inv1, c_inv2, c_inv3 = st.columns([2, 2, 1])
                     with c_inv1:
@@ -150,15 +148,17 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                         st.code(row.get('token', ''), language=None)
                     with c_inv3:
                         if st.button("📩 Reenviar", key=f"btn_reenviar_{row.get('id', idx)}"):
-                            nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
-                            asunto = f"Código de Acceso Web - {nombre_club}"
+                            nombre_club = st.session_state.get("club_seleccionado", "Sistema de Natación")
+                            token_code = row.get('token', '')
+                            asunto = f"Código de Acceso Web ({token_code}) - {nombre_club}"
                             cuerpo_html = f"""
-                            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-                                <h2>¡Hola, {row.get('nombre')}!</h2>
-                                <p>Tu código de acceso web para el sistema de <strong>{nombre_club}</strong> es:</p>
-                                <div style="background-color: #f4f4f4; padding: 12px; font-weight: bold; font-size: 16px; border-radius: 5px; display: inline-block;">
-                                    {row.get('token')}
+                            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee; border-radius: 8px;">
+                                <h2 style="color: #1a5276; margin-top: 0;">¡Hola, {row.get('nombre')}!</h2>
+                                <p>Tu código de acceso de 6 dígitos para el sistema de <strong>{nombre_club}</strong> es:</p>
+                                <div style="background-color: #f2f4f4; padding: 15px; font-weight: bold; font-size: 24px; letter-spacing: 5px; color: #2e86c1; border-radius: 6px; text-align: center; margin: 20px 0;">
+                                    {token_code}
                                 </div>
+                                <p style="font-size: 12px; color: #7f8c8d;">Este código es de uso personal y permite habilitar tu acceso al portal.</p>
                             </div>
                             """
                             exito, msg = enviar_correo_con_pdf(
