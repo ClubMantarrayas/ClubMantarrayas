@@ -30,18 +30,24 @@ def desencriptar_credencial(texto_cifrado: str, llave_maestra: str) -> str:
 # MÓDULO DE ENVÍO DE CORREOS SMTP (UBICADO AL PRINCIPIO DE LA LIBRERÍA)
 # ==============================================================================
 
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+import streamlit as st
+
 def enviar_correo_con_pdf(destinatario, asunto, cuerpo_html, pdf_bytes=None, nombre_archivo_pdf="documento.pdf"):
     """
-    Función de envío SMTP adaptable según el puerto configurado (465 SSL / 587 TLS).
+    Envía correos utilizando el servidor SMTP de Yahoo Mail (Puerto 465 SSL).
     """
     try:
         remitente = str(st.secrets["smtp"]["email"]).strip()
         password = str(st.secrets["smtp"]["password"]).replace(" ", "").strip()
         servidor = str(st.secrets["smtp"]["server"]).strip()
-        puerto = int(st.secrets["smtp"].get("port", 587))
+        puerto = int(st.secrets["smtp"].get("port", 465))
 
         msg = MIMEMultipart()
-        msg['From'] = f"Sistema Club <{remitente}>"
+        msg['From'] = f"Sistema Clubes <{remitente}>"
         msg['To'] = destinatario
         msg['Subject'] = asunto
         msg.attach(MIMEText(cuerpo_html, 'html'))
@@ -51,27 +57,16 @@ def enviar_correo_con_pdf(destinatario, asunto, cuerpo_html, pdf_bytes=None, nom
             adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_archivo_pdf)
             msg.attach(adjunto)
 
-        # 1. Si el puerto es 465 usamos SSL directo
-        if puerto == 465:
-            with smtplib.SMTP_SSL(servidor, puerto, timeout=15) as server:
-                server.login(remitente, password)
-                server.send_message(msg)
+        # Conexión SSL directa con Yahoo
+        with smtplib.SMTP_SSL(servidor, puerto, timeout=15) as server:
+            server.login(remitente, password)
+            server.send_message(msg)
         
-        # 2. Si el puerto es 587 (u otro) usamos TLS con apretón de manos explícito (ehlo)
-        else:
-            with smtplib.SMTP(servidor, puerto, timeout=15) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(remitente, password)
-                server.send_message(msg)
-
         return True, "Correo enviado exitosamente."
     except Exception as e:
         error_msg = f"Error en el servidor SMTP: {str(e)}"
         print(error_msg)
         return False, error_msg
-
 
 def enviar_email(destinatario: str, asunto: str, cuerpo_html: str) -> tuple:
     """
