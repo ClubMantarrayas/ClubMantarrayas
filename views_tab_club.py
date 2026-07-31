@@ -67,7 +67,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     pass
 
                 # 3. ACCIÓN SECUNDARIA: Generar nuevo token único
-                token_invitacion = secrets.token_hex(16)
+                token_invitacion = f"{secrets.randbelow(900000) + 100000}"
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
                 payload_invitacion = {
