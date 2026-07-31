@@ -431,7 +431,7 @@ def render_comunicados_y_correspondencia(supabase, id_usuario_club):
             key=f"com_cuerpo_{tipo_plantilla.lower()}"
         )
 
-    nombre_club = st.session_state.get("club_seleccionado") or st.secrets.get("NOMBRE_CLUB_LOCAL", "Mantarrayas Swimming Sport Club")
+    nombre_club = st.session_state.get("club_seleccionado") or st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
     logo_b64 = obtener_logo_base64(supabase)
     html_documento = generar_html_comunicado(
         logo_b64, nombre_club, tipo_plantilla, correlativo, 
