@@ -20,6 +20,11 @@ from formulas_lib_funciones import (
 from pdf_memo_utility import generar_pdf_memorandum_nativo
 
 
+import datetime
+import secrets
+import pandas as pd
+import streamlit as st
+
 def render_pre_alta_atleta(supabase, id_usuario_club):
     st.markdown("### ➕ Registro Directo de Integrantes a la Nómina")
     st.caption("Al guardar los datos mínimos, el integrante queda registrado como ACTIVO de inmediato en la nómina del club.")
@@ -46,7 +51,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
             try:
                 email_limpio = pa_email.strip().lower()
 
-                # 1. ACCIÓN PRINCIPAL: Carga directa e inmediata con estatus 'Activo'
+                # 1. ACCIÓN PRINCIPAL: Carga directa en usuarios
                 payload_usuario = {
                     "nombre": pa_nombre.strip(),
                     "email": email_limpio,
@@ -66,7 +71,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 except Exception:
                     pass
 
-                # 3. GENERAR CÓDIGO NUMÉRICO DE 6 DÍGITOS
+                # 3. GENERAR CÓDIGO NUMÉRICO DE 6 DÍGITOS Y 24H VIGENCIA
                 token_invitacion = f"{secrets.randbelow(900000) + 100000}"
                 expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
                 
@@ -82,7 +87,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 4. NOTIFICACIÓN POR CORREO CON FORMATO DE CÓDIGO DE 6 DÍGITOS
+                # 4. NOTIFICACIÓN POR CORREO
                 nombre_club = st.session_state.get("club_seleccionado", "Sistema de Natación")
                 asunto = f"Código de Acceso Web ({token_invitacion}) - {nombre_club}"
                 
@@ -106,14 +111,14 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 st.success(f"✅ Integrante **{pa_nombre}** registrado como **ACTIVO**.")
                 if not exito:
-                    st.info(f"ℹ️ Registro completado en la BD. (Aviso de envío SMTP: {msg_correo})")
+                    st.info(f"ℹ️ Registro completado en BD. (Aviso de envío SMTP: {msg_correo})")
                     
             except Exception as e:
                 st.error(f"Error al guardar el usuario en la base de datos: {e}")
 
-    # --- CONSULTA Y REENVÍO DE TOKENS DE ACCESO WEB ---
+    # --- CONSULTA, REENVÍO Y REGENERACIÓN DE TOKENS ---
     st.markdown("---")
-    with st.expander("🔑 **Consultar y Reenviar Tokens de Acceso Web**", expanded=False):
+    with st.expander("🔑 **Consultar, Reenviar o Renovar Tokens de Acceso Web**", expanded=False):
         try:
             res_inv = supabase.table("invitaciones")\
                 .select("*")\
@@ -124,12 +129,12 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
             df_inv = pd.DataFrame(res_inv.data) if res_inv.data else pd.DataFrame()
             
             if df_inv.empty:
-                st.info("No hay tokens de acceso web pendientes o sin usar.")
+                st.info("No hay tokens de acceso web pendientes.")
             else:
                 df_inv["email_norm"] = df_inv["email"].astype(str).str.strip().str.lower()
                 df_validos = df_inv.drop_duplicates(subset=["email_norm"], keep="first")
                 
-                # Inactivar tokens viejos en silencio
+                # Desactivar registros viejos duplicados
                 ids_obsoletos = df_inv[~df_inv["id"].isin(df_validos["id"])]["id"].tolist()
                 if ids_obsoletos:
                     for id_obsoleto in ids_obsoletos:
@@ -138,15 +143,36 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                         except Exception:
                             pass
 
-                st.caption("A continuación se muestra el único código activo para cada integrante:")
+                st.caption("Lista de accesos web pendientes por usuario:")
+                ahora_utc = datetime.datetime.now(datetime.timezone.utc)
+
                 for idx, row in df_validos.iterrows():
-                    c_inv1, c_inv2, c_inv3 = st.columns([2, 2, 1])
+                    # Evaluar si el token ya expiró
+                    expira_str = row.get('expira_en')
+                    esta_vencido = False
+                    if expira_str:
+                        try:
+                            expira_dt = datetime.datetime.fromisoformat(expira_str.replace("Z", "+00:00"))
+                            if ahora_utc > expira_dt:
+                                esta_vencido = True
+                        except Exception:
+                            pass
+
+                    c_inv1, c_inv2, c_inv3 = st.columns([2.5, 1.5, 2])
+                    
                     with c_inv1:
                         st.write(f"**{row.get('nombre', 'Sin Nombre')}** ({row.get('rol', 'Sin Rol')})")
                         st.caption(f"Email: {row.get('email', 'N/A')}")
+                        if esta_vencido:
+                            st.markdown("🔴 `<span style='color:red; font-weight:bold;'>VENCIDO (+24h)</span>`", unsafe_allow_html=True)
+                        else:
+                            st.markdown("🟢 `<span style='color:green; font-weight:bold;'>VIGENTE</span>`", unsafe_allow_html=True)
+                    
                     with c_inv2:
                         st.code(row.get('token', ''), language=None)
+                    
                     with c_inv3:
+                        # BOTÓN 1: REENVIAR (Mismo token)
                         if st.button("📩 Reenviar", key=f"btn_reenviar_{row.get('id', idx)}"):
                             nombre_club = st.session_state.get("club_seleccionado", "Sistema de Natación")
                             token_code = row.get('token', '')
@@ -161,15 +187,56 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                                 <p style="font-size: 12px; color: #7f8c8d;">Este código es de uso personal y permite habilitar tu acceso al portal.</p>
                             </div>
                             """
-                            exito, msg = enviar_correo_con_pdf(
-                                destinatario=row.get('email'),
-                                asunto=asunto,
-                                cuerpo_html=cuerpo_html
-                            )
+                            exito, msg = enviar_correo_con_pdf(destinatario=row.get('email'), asunto=asunto, cuerpo_html=cuerpo_html)
                             if exito:
                                 st.success("📩 Reenviado!")
                             else:
                                 st.error(f"Error: {msg}")
+
+                        # BOTÓN 2: RENOVAR TOKEN (Nuevo token de 6 dígitos + reinicio de 24h)
+                        if st.button("🔄 Renovar (Nuevo PIN 24h)", key=f"btn_renovar_{row.get('id', idx)}", type="secondary"):
+                            try:
+                                email_u = row.get('email')
+                                # 1. Marcar el token actual como usado
+                                supabase.table("invitaciones").update({"usado": True}).eq("id", row.get('id')).execute()
+                                
+                                # 2. Generar nuevo token y nuevas 24 horas
+                                nuevo_token = f"{secrets.randbelow(900000) + 100000}"
+                                nueva_expiracion = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)).isoformat()
+                                
+                                payload_nuevo = {
+                                    "token": nuevo_token,
+                                    "nombre": row.get('nombre'),
+                                    "email": email_u,
+                                    "rol": row.get('rol'),
+                                    "expira_en": nueva_expiracion,
+                                    "usado": False,
+                                    "creado_por": id_usuario_club
+                                }
+                                supabase.table("invitaciones").insert(payload_nuevo).execute()
+
+                                # 3. Enviar el nuevo token por correo
+                                nombre_club = st.session_state.get("club_seleccionado", "Sistema de Natación")
+                                asunto = f"Nuevo Código de Acceso Web ({nuevo_token}) - {nombre_club}"
+                                cuerpo_html = f"""
+                                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee; border-radius: 8px;">
+                                    <h2 style="color: #1a5276; margin-top: 0;">¡Hola, {row.get('nombre')}!</h2>
+                                    <p>Se ha generado un <strong>nuevo código de acceso</strong> para tu usuario en <strong>{nombre_club}</strong>:</p>
+                                    <div style="background-color: #f2f4f4; padding: 15px; font-weight: bold; font-size: 24px; letter-spacing: 5px; color: #2e86c1; border-radius: 6px; text-align: center; margin: 20px 0;">
+                                        {nuevo_token}
+                                    </div>
+                                    <p style="font-size: 12px; color: #7f8c8d;">Este nuevo código estará activo durante las próximas 24 horas.</p>
+                                </div>
+                                """
+                                exito, msg = enviar_correo_con_pdf(destinatario=email_u, asunto=asunto, cuerpo_html=cuerpo_html)
+                                if exito:
+                                    st.success("✅ ¡Token renovado y enviado por correo!")
+                                    st.rerun()
+                                else:
+                                    st.warning(f"⚠️ Token renovado en BD pero fallo el correo: {msg}")
+                            except Exception as err_renov:
+                                st.error(f"Error al renovar token: {err_renov}")
+
         except Exception as e:
             st.error(f"Error al consultar tokens: {e}")
                 
