@@ -82,8 +82,8 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                 
                 supabase.table("invitaciones").insert(payload_invitacion).execute()
                 
-                # 4. Envío de Correo Inicial
-                nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
+# 4. Envío de Correo Inicial
+                nombre_club = st.session_state.get("club_seleccionado") or st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
                 asunto = f"Código de Acceso Web ({token_invitacion}) - {nombre_club}"
                 
                 cuerpo_html = f"""
@@ -193,7 +193,7 @@ def render_pre_alta_atleta(supabase, id_usuario_club):
                     
                     with c_inv3:
                         if st.button("📩 Enviar Código", key=f"btn_enviar_{row.get('id', idx)}", width="stretch"):
-                            nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
+                            nombre_club = st.session_state.get("club_seleccionado") or st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
                             token_code = row.get('token', '')
                             asunto = f"Código de Acceso Web ({token_code}) - {nombre_club}"
                             cuerpo_html = f"""
@@ -431,7 +431,7 @@ def render_comunicados_y_correspondencia(supabase, id_usuario_club):
             key=f"com_cuerpo_{tipo_plantilla.lower()}"
         )
 
-    nombre_club = st.session_state.get("club_seleccionado", "Swimming Club")
+    nombre_club = st.session_state.get("club_seleccionado") or st.secrets.get("NOMBRE_CLUB_LOCAL", "Mantarrayas Swimming Sport Club")
     logo_b64 = obtener_logo_base64(supabase)
     html_documento = generar_html_comunicado(
         logo_b64, nombre_club, tipo_plantilla, correlativo, 
