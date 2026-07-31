@@ -87,6 +87,12 @@ def limpiar_sesion_al_autenticar():
     if key not in LLAVES_INFRAESTRUCTURA:
       del st.session_state[key]
 
+# 1. Obtener el nombre del club desde st.secrets (con un valor de respaldo opcional)
+CLUB_DESDE_SECRETS = st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
+
+# 2. Inicializar en session_state si aún no existe
+if "club_seleccionado" not in st.session_state or not st.session_state.club_seleccionado:
+    st.session_state["club_seleccionado"] = CLUB_DESDE_SECRETS
 
 def login_usuario(user, password, client_db):
   try:
