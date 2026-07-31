@@ -235,7 +235,7 @@ def mostrar_pantalla_login():
                   " datos."
               )
 
-      # --- TAB ÚNICO DE REGISTRO: CERTIFICACIÓN DE PRE-ALTA VIA OTP ---
+# --- TAB ÚNICO DE REGISTRO: CERTIFICACIÓN DE PRE-ALTA VIA OTP ---
       with tab_registro_otp:
         st.markdown("### 📝 Registro de Usuarios (Pre-Alta)")
         st.caption(
@@ -265,7 +265,7 @@ def mostrar_pantalla_login():
           )
 
           if st.form_submit_button(
-              "🚀 Certificar y Crear Cuenta", use_container_width=True
+              "🚀 Certificar y Activar Cuenta", use_container_width=True
           ):
             if (
                 not otp_token_input
@@ -273,107 +273,74 @@ def mostrar_pantalla_login():
                 or not nuevo_alias_pa
                 or not nueva_clave_pa
             ):
-              st.error("⚠️ Todos los campos de acceso son obligatorios.")
+              st.error("⚠️ Todos los campos son obligatorios.")
             elif nueva_clave_pa != confirmar_clave_pa:
               st.error("❌ Las contraseñas no coinciden.")
             else:
               try:
+                email_clean = email_prealta_input.strip().lower()
+                alias_clean = nuevo_alias_pa.strip().lower()
+
+                # 1. Validar el token en la tabla invitaciones
                 res_inv = (
                     instancia_supabase_club.table("invitaciones")
                     .select("*")
                     .eq("token", otp_token_input.strip())
-                    .eq("email", email_prealta_input.strip().lower())
+                    .eq("email", email_clean)
                     .eq("usado", False)
                     .execute()
                 )
 
                 if not res_inv.data:
                   st.error(
-                      "❌ Código OTP inválido, expirado o el correo no"
-                      " coincide."
+                      "❌ Código OTP inválido, expirado o el correo no coincide."
                   )
                 else:
                   invitacion = res_inv.data[0]
                   expira_en = datetime.datetime.fromisoformat(
-                      invitacion["expira_en"]
+                      invitacion["expira_en"].replace("Z", "+00:00")
                   )
 
-                  if datetime.datetime.now(
-                      datetime.timezone.utc
-                  ) > expira_en.replace(tzinfo=datetime.timezone.utc):
+                  if datetime.datetime.now(datetime.timezone.utc) > expira_en:
                     st.error(
                         "⌛ El código OTP ha expirado (vigencia de 24 horas)."
                         " Solicite uno nuevo a la administración."
                     )
                   else:
-                    datos_perfil = invitacion.get("datos_perfil", {})
-
-                    nombre_val = invitacion.get("nombre")
-                    email_val = invitacion.get("email")
-                    rol_val = invitacion.get("rol")
-
-                    raw_genero = datos_perfil.get("genero") or datos_perfil.get(
-                        "sexo"
+                    # 2. Verificar que el alias deseado no esté en uso por otro usuario
+                    res_alias = (
+                        instancia_supabase_club.table("usuarios")
+                        .select("id")
+                        .eq("usuario", alias_clean)
+                        .execute()
                     )
-                    genero_val = (
-                        "F"
-                        if raw_genero in ["F", "Femenino"]
-                        else (
-                            "M"
-                            if raw_genero in ["M", "Masculino"]
-                            else None
-                        )
-                    )
-
-                    fecha_nac_val = datos_perfil.get("fecha_nacimiento")
-
-                    faltantes = []
-                    if not nombre_val:
-                      faltantes.append("Nombre")
-                    if not email_val:
-                      faltantes.append("Email")
-                    if not rol_val:
-                      faltantes.append("Rol")
-                    if not genero_val:
-                      faltantes.append("Género")
-                    if not fecha_nac_val:
-                      faltantes.append("Fecha de Nacimiento")
-
-                    if faltantes:
+                    if res_alias.data:
                       st.error(
-                          "❌ Error de Pre-Alta: La invitación carece de los"
-                          " siguientes datos obligatorios:"
-                          f" **{', '.join(faltantes)}**. Contacte al"
-                          " administrador."
+                          f"❌ El alias de usuario **{alias_clean}** ya está registrado. Por favor elija otro."
                       )
                     else:
-                      usuario_oficial = {
-                          "nombre": nombre_val,
-                          "usuario": nuevo_alias_pa.strip().lower(),
-                          "email": email_val.strip().lower(),
+                      # 3. ACTUALIZAR el usuario existente en la tabla 'usuarios'
+                      payload_actualizacion = {
+                          "usuario": alias_clean,
                           "contrasena": hash_password(nueva_clave_pa),
-                          "rol": rol_val,
-                          "estatus": "Activo",
-                          "cedula": datos_perfil.get("cedula", ""),
-                          "telefono": datos_perfil.get("telefono", ""),
-                          "genero": genero_val,
-                          "fecha_nacimiento": fecha_nac_val,
+                          "estatus": "Activo"
                       }
 
-                      instancia_supabase_club.table("usuarios").insert(
-                          usuario_oficial
-                      ).execute()
+                      instancia_supabase_club.table("usuarios").update(
+                          payload_actualizacion
+                      ).eq("email", email_clean).execute()
+
+                      # 4. Marcar la invitación como usada
                       instancia_supabase_club.table("invitaciones").update(
                           {"usado": True}
                       ).eq("id", invitacion["id"]).execute()
 
                       st.success(
-                          f"🎉 ¡Registro completado exitosamente para"
-                          f" **{nombre_val}** como **{rol_val}**! Ya puedes"
-                          " iniciar sesión."
+                          f"🎉 ¡Activación completada exitosamente para"
+                          f" **{invitacion.get('nombre')}**! Ya puedes iniciar sesión con tu usuario **{alias_clean}**."
                       )
               except Exception as pa_err:
-                st.error(f"Error al procesar el registro: {pa_err}")
+                st.error(f"Error al procesar la activación: {pa_err}")
 
       # --- TAB RECUPERAR ---
       with tab_recuperar:
