@@ -57,26 +57,16 @@ def renderizar_tab_grafico(datos_sidebar):
     st.session_state.nadador_seleccionado_id = usuario_id
 
     # =====================================================================
-    # 2. CONSULTAS A LA CACHÉ DE SUPABASE Y MAPEADO DE REFERENCIAS
+    # 2. EXTRACCIÓN DE REFERENCIAS (DESDE EL SIDEBAR)
     # =====================================================================
-    referencias_raw = []
-    if not simulacion_externa and not modo_equipo:
-        referencias_raw = obtener_marcas_referencia_cache(prueba, genero, categoria)
-
-    m_ano = m_panam_b = m_panam_a = m_wa_b = m_wa_a = m_wr = 0.0
-    for ref in referencias_raw:
-        nombre_marca = ref.get("nombre_marca", ref.get("nombre", "")).upper()
-        try:
-            val = float(ref.get("tiempo", 0))
-        except (ValueError, TypeError): continue
-        
-        if "MÍNIMA" in nombre_marca or "AÑO" in nombre_marca: m_ano = val
-        elif "PANAM" in nombre_marca and "B" in nombre_marca: m_panam_b = val
-        elif "PANAM" in nombre_marca and "A" in nombre_marca: m_panam_a = val
-        elif "WA B" in nombre_marca: m_wa_b = val
-        elif "WA A" in nombre_marca: m_wa_a = val
-        elif "RECORD" in nombre_marca or "WR" in nombre_marca: m_wr = val
-
+    # En lugar de volver a consultar a la BD y fallar por formato, 
+    # extraemos los valores exactos que ya procesó el sidebar.
+    m_ano = float(datos_sidebar.get("m_ano", 0.0))
+    m_panam_b = float(datos_sidebar.get("m_panam_b", 0.0))
+    m_panam_a = float(datos_sidebar.get("m_panam_a", 0.0))
+    m_wa_b = float(datos_sidebar.get("m_wa_b", 0.0))
+    m_wa_a = float(datos_sidebar.get("m_wa_a", 0.0))
+    m_wr = float(datos_sidebar.get("m_wr", 0.0))
     # =====================================================================
     # 3. RECOPILACIÓN DE DATOS Y MOTOR MATEMÁTICO (INDIVIDUAL)
     # =====================================================================
