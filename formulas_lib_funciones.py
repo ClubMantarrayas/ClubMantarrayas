@@ -312,71 +312,57 @@ def obtener_pruebas_por_categoria(cat_atleta: str) -> list:
             '--- 🏊‍♂️ COMBINADO ---', '200 Combinado', '400 Combinado'
         ]
 
-import numpy as np
-from scipy.optimize import fsolve
-
 # -------------------------------------------------------------
-# MOTOR MATEMÁTICO DOBLE CALCULO DE CURVA (REFINADO Y ROBUSTO)
+# MOTOR MATEMÁTICO DOBLE CÁLCULO DE CURVA (CORREGIDO)
 # -------------------------------------------------------------
 
 def resolver_k_individual(eq_t0, eq_T0, eq_t_pb, eq_T_pb, eq_t_peak, eq_T_target):
     """
-    Resuelve el factor de curvatura 'k' garantizando 100% de compatibilidad con la firma existente.
-    Corrige la singularidad k->0 (L'Hôpital) y maneja numéricamente casos límite sin romper el retorno.
+    Resuelve el factor de curvatura 'k' exacto sin acotamientos artificiales.
+    Soporta la resolución exacta de k alto (como en caídas iniciales pronunciadas)
+    y previene colapsos en k -> 0 mediante el límite analítico de L'Hôpital.
     """
-    # 1. Validación de fronteras temporales (Misma lógica original)
-    if not (eq_t_peak > eq_t0 and eq_t_pb >= eq_t0 and eq_t_pb <= eq_t_peak):
-        return None
+    # Condición de validez temporal idéntica a la versión original
+    if eq_t_peak > eq_t0 and eq_t_pb >= eq_t0:
+        tau_eq = (eq_t_pb - eq_t0) / (eq_t_peak - eq_t0)
 
-    # Guardrails internos silenciosos para evitar divergencia de fsolve en bordes críticos
-    eq_t_peak_efectivo = eq_t_pb + 0.15 if (eq_t_peak - eq_t_pb) < 0.15 else eq_t_peak
-    
-    if (eq_T_pb - eq_T_target) < 0.05:
-        return 8.0  # Asíntota rápida interna si el PB ya iguala a la meta
+        def ecuacion_k_eq(k_val):
+            k = float(k_val[0]) if isinstance(k_val, (np.ndarray, list)) else float(k_val)
+            
+            # Límite continuo cuando k tiende a 0 (Evita retornar 1e6 de forma abrupta)
+            if abs(k) < 1e-5:
+                ter_exp = 1.0 - tau_eq
+            else:
+                try:
+                    denominador = 1.0 - np.exp(-k)
+                    if abs(denominador) < 1e-12:
+                        ter_exp = 1.0 - tau_eq
+                    else:
+                        ter_exp = (np.exp(-k * tau_eq) - np.exp(-k)) / denominador
+                except (OverflowError, ZeroDivisionError):
+                    return 1e6
 
-    tau_eq = (eq_t_pb - eq_t0) / (eq_t_peak_efectivo - eq_t0)
+            T_predicho = eq_T_target + (eq_T0 - eq_T_target) * ter_exp
+            return T_predicho - eq_T_pb
 
-    def ecuacion_k_eq(k_val):
-        k = float(k_val[0]) if isinstance(k_val, (np.ndarray, list)) else float(k_val)
+        # Búsqueda de raíz sin restricción de clip
+        k_opt_eq, info, ier, msg = fsolve(ecuacion_k_eq, 1.0, full_output=True)
         
-        # Evaluación del límite continuo cuando k tiende a 0 (Evita salto a 1e6)
-        if abs(k) < 1e-5:
-            ter_exp = 1.0 - tau_eq
-        else:
-            try:
-                denominador = 1.0 - np.exp(-k)
-                if abs(denominador) < 1e-12:
-                    ter_exp = 1.0 - tau_eq
-                else:
-                    ter_exp = (np.exp(-k * tau_eq) - np.exp(-k)) / denominador
-            except (OverflowError, ZeroDivisionError):
-                return 1e6
-
-        T_predicho = eq_T_target + (eq_T0 - eq_T_target) * ter_exp
-        return T_predicho - eq_T_pb
-
-    # Semilla x0 = 0.1 para favorecer convergencia en zonas de baja curvatura
-    k_opt_eq, info, ier, msg = fsolve(ecuacion_k_eq, 0.1, full_output=True)
-    
-    if ier == 1:
-        k_res = float(k_opt_eq[0])
-        return float(np.clip(k_res, -10.0, 10.0))
-        
-    # Fallback transparente: si fsolve falla, se retorna 0.0 (progresión lineal) en vez de romper la gráfica
-    return 0.0
+        if ier == 1:
+            return float(k_opt_eq[0])
+            
+    return None
 
 
 def calcular_curva_atleta(edades_arr, eq_t0, eq_T0, eq_t_pb, eq_T_pb, eq_t_peak, eq_T_target, k_eq, h_eq):
     """
-    Calcula el arreglo de tiempos proyectados. 
-    100% compatible con la firma original pero vectorizado con NumPy (Ultra-rápido).
-    Maneja internamente si k_eq es None o se aproxima a cero.
+    Calcula el vector de tiempos proyectados de forma vectorial (NumPy).
+    Mantiene exacta fidelidad con la ecuación matemática original.
     """
     edades = np.asarray(edades_arr, dtype=float)
     D_eq = eq_T_pb - eq_T_target
     tiempos = np.zeros_like(edades)
 
-    # Máscaras booleanas para tramos (Pre-PB vs Post-PB)
     fase_desarrollo = edades < eq_t_pb
     fase_madurez = ~fase_desarrollo
 
