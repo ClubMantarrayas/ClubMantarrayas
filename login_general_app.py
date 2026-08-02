@@ -75,7 +75,6 @@ def obtener_cliente_supabase():
 # 🧹 PURGA DE SEGURIDAD
 # ============================================================
 def limpiar_sesion_al_autenticar():
-  # Preservar llaves clave de infraestructura y configuración global
   LLAVES_INFRAESTRUCTURA = {"puente_validado", "supabase", "club_seleccionado"}
 
   for key in list(st.session_state.keys()):
@@ -106,7 +105,7 @@ def login_usuario(user, password, client_db):
       user_data = response.data[0]
 
       if user_data.get("estatus") == "Inactivo":
-        st.error("⚠️ Aún no puedes ingresar. Debes contactar con la administración.")
+        st.session_state["login_mensaje_error"] = "⚠️ Aún no puedes ingresar. Debes contactar con la administración."
         return False
 
       limpiar_sesion_al_autenticar()
@@ -147,18 +146,36 @@ def login_usuario(user, password, client_db):
         st.session_state.nadador_seleccionado_genero = None
         st.session_state.nadador_seleccionado_categoria = None
 
+      st.session_state["login_mensaje_error"] = None
       return True
+    
+    st.session_state["login_mensaje_error"] = "Credenciales incorrectas o cuenta en revisión. Verifique sus datos."
     return False
   except Exception as e:
-    st.error(f"Error en Login: {e}")
+    st.session_state["login_mensaje_error"] = f"Error en Login: {e}"
     return False
+
+
+# ============================================================
+# ⚡ CALLBACK PRE-RENDERIZADO (Ejecuta la validación ANTES del UI)
+# ============================================================
+def callback_procesar_login():
+  usuario = st.session_state.get("login_input_usuario", "").strip()
+  contrasena = st.session_state.get("login_input_contrasena", "")
+  db_client = st.session_state.get("supabase")
+
+  if not usuario or not contrasena:
+    st.session_state["login_mensaje_error"] = "Por favor ingrese usuario y contraseña."
+    return
+
+  login_usuario(usuario, contrasena, db_client)
 
 
 def mostrar_pantalla_login():
   """Función principal que renderiza el Login, Certificación por Pre-Alta (OTP) y Recuperación."""
   
   # 🛡️ 1. GUARD DE SALIDA TEMPRANA
-  # Si el usuario ya está autenticado, salir inmediatamente para evitar parpadeos o renders innecesarios.
+  # Si el callback ya autenticó al usuario antes de renderizar, salimos de inmediato.
   if st.session_state.get("autenticado", False):
     return
 
@@ -183,7 +200,6 @@ def mostrar_pantalla_login():
   # ------------------------------------------------------------
   nombre_club = st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
   
-  # Encabezado Centralizado Superior
   st.markdown(
       f"<h2 style='text-align: center; color: #0F172A; margin-bottom: 2px;'>🏊‍♂️ {nombre_club}</h2>",
       unsafe_allow_html=True,
@@ -208,21 +224,20 @@ def mostrar_pantalla_login():
     # --- TAB LOGIN ---
     with tab_login:
       st.caption("Nota: Los nombres de usuario se procesan en minúsculas.")
-      with st.form("form_login"):
-        usuario_input = st.text_input("Usuario:")
-        usuario_lower = usuario_input.lower()
-        contrasena_input = st.text_input("Contraseña:", type="password")
 
-        if st.form_submit_button("Ingresar", use_container_width=True):
-          if login_usuario(
-              usuario_lower, contrasena_input, instancia_supabase_club
-          ):
-            # 🚀 TRANSICIÓN LIMPIA: Rerun inmediato sin st.success() intermediario ni st.stop()
-            st.rerun()
-          else:
-            st.error(
-                "Credenciales incorrectas o cuenta en revisión. Verifique sus datos."
-            )
+      if st.session_state.get("login_mensaje_error"):
+        st.error(st.session_state["login_mensaje_error"])
+
+      with st.form("form_login"):
+        st.text_input("Usuario:", key="login_input_usuario")
+        st.text_input("Contraseña:", type="password", key="login_input_contrasena")
+
+        # La validación ocurre en el callback antes de repintar la vista
+        st.form_submit_button(
+            "Ingresar",
+            use_container_width=True,
+            on_click=callback_procesar_login
+        )
 
     # --- TAB REGISTRO PRE-ALTA OTP ---
     with tab_registro_otp:
@@ -407,5 +422,4 @@ def mostrar_pantalla_login():
               except Exception as rec_err:
                 st.error(f"Error durante el proceso de restablecimiento: {rec_err}")
 
-  # Se frena la ejecución solo si el usuario no está autenticado
   st.stop()
