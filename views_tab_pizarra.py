@@ -3,8 +3,13 @@ import pandas as pd
 import datetime
 import urllib.parse
 
-# 🌐 Ajuste de orden: Importación unificada en la raíz del módulo
+# 🌐 Importaciones unificadas de librerías y caché
 from formulas_lib_funciones import calcular_edad_tecnica_al_31_dic, calcular_categoria_competencia  
+from conections_supabase_cache import (
+    obtener_atletas_asignados_cache,
+    obtener_nadadores_activos_cache,
+    obtener_usuario_por_id_cache,
+)
 
 def renderizar_tab_pizarra(datos_sidebar):
     """
@@ -143,7 +148,7 @@ def renderizar_tab_pizarra(datos_sidebar):
                 st.code(texto_exportacion, language="markdown")  
 
             # =============================================================================
-            # 🔍 SECCIÓN DE SEGMENTACIÓN (ASISTENCIA/CARGA)
+            # 🔍 SECCIÓN DE SEGMENTACIÓN (ASISTENCIA/CARGA) - RESOLUCIÓN VÍA CACHÉ
             # =============================================================================
             st.markdown("---")  
             st.markdown("### 🔍 Segmentación de Destinatarios (Asistencia/Carga)")  
@@ -154,40 +159,63 @@ def renderizar_tab_pizarra(datos_sidebar):
             with col_foto2:  
                 tipo_filtro = st.radio("Segmentar adicionalmente por:", options=["Todos los Atletas", "Categoría Etaria", "Atletas Específicos"], horizontal=True, key="piz_radio_tipo_idx")  
 
-            ctx_supabase = supabase if supabase else st.session_state.get("supabase_client")  
-            atletas_pool = []  
+            # --- RESOLUCIÓN DE ID Y ROL BLINDADO DE SESIÓN ---
+            user_raw = (
+                st.session_state.get("usuario_logueado_id")
+                or st.session_state.get("usuario_id")
+                or st.session_state.get("user")
+            )
+            if isinstance(user_raw, dict):
+                id_usuario_logueado = user_raw.get("id") or user_raw.get("usuario_id")
+            else:
+                id_usuario_logueado = user_raw
 
-            if ctx_supabase:  
-                try:  
-                    es_entrenador = st.session_state.get("rol") == "Entrenador"  
-                    entrenador_id = st.session_state.get("usuario_id")  
-                    permitir_consulta = True  
-                    ids_autorizados = []  
+            rol_real = st.session_state.get("rol_real", st.session_state.get("rol", "Nadador"))
+            rol_activo = st.session_state.get("rol", "Nadador")
 
-                    if es_entrenador:  
-                        if entrenador_id:  
-                            resp_asig = ctx_supabase.table("asignaciones").select("atleta_id").eq("entrenador_id", entrenador_id).execute()  
-                            if resp_asig.data:  
-                                ids_autorizados = [reg["atleta_id"] for reg in resp_asig.data]  
-                            if not ids_autorizados:  
-                                permitir_consulta = False  
-                        else:  
-                            st.error("❌ Error de sesión: No se encontró el ID del entrenador.")  
-                            permitir_consulta = False  
+            atletas_pool = []
 
-                    if permitir_consulta:  
-                        query_atletas = ctx_supabase.table("usuarios").select("id, nombre, email, genero, fecha_nacimiento").eq("rol", "Nadador").eq("estatus", "Activo")  
-                        if es_entrenador:  
-                            query_atletas = query_atletas.in_("id", ids_autorizados)  
-                        
-                        resp_sb = query_atletas.execute()  
-                        if resp_sb.data:  
-                            atletas_pool = resp_sb.data  
-                    else:  
-                        st.warning("⚠️ No tienes atletas asignados en tu perfil de Entrenador.")  
-                except Exception as e:  
-                    st.error(f"Error al cargar nómina desde Supabase: {e}")  
+            if rol_activo == "Nadador":
+                if id_usuario_logueado:
+                    usr = obtener_usuario_por_id_cache(id_usuario_logueado)
+                    if usr:
+                        atletas_pool = [usr]
 
+            elif rol_activo == "Entrenador":
+                id_entrenador_evaluar = None
+                
+                # Resolvemos de dónde viene el entrenador (Emulaciones vs Real)
+                if rol_real == "Administrador":
+                    id_entrenador_evaluar = st.session_state.get("sb_entrenador_simular_selector")
+                else:
+                    id_entrenador_evaluar = id_usuario_logueado
+
+                if id_entrenador_evaluar is not None:
+                    ids_autorizados = obtener_atletas_asignados_cache(id_entrenador_evaluar) or []
+                    set_ids_str = set()
+                    for item in ids_autorizados:
+                        if isinstance(item, dict):
+                            val = item.get("atleta_id") or item.get("id") or item.get("usuario_id")
+                            if val is not None:
+                                set_ids_str.add(str(val))
+                        elif item is not None:
+                            set_ids_str.add(str(item))
+
+                    if set_ids_str:
+                        todos_nadadores = obtener_nadadores_activos_cache() or []
+                        atletas_pool = [
+                            a for a in todos_nadadores
+                            if str(a.get("id") if a.get("id") is not None else a.get("usuario_id")) in set_ids_str
+                        ]
+                    else:
+                        st.warning("⚠️ No tienes atletas asignados en tu perfil de Entrenador.")
+                else:
+                    st.error("❌ Error de sesión: No se detectó ID válido de Entrenador.")
+
+            elif rol_activo in ["Head Coach", "Administrador"]:
+                atletas_pool = obtener_nadadores_activos_cache() or []
+
+            # Aplicar Filtros Secundarios sobre la nómina obtenida
             if filtro_genero == "Femenino (F)":  
                 atletas_pool = [a for a in atletas_pool if a.get("genero") == "F"]  
             elif filtro_genero == "Masculino (M)":  
@@ -198,22 +226,22 @@ def renderizar_tab_pizarra(datos_sidebar):
                 for a in atletas_pool if a.get("fecha_nacimiento")  
             ]))) if atletas_pool else []  
 
-            dict_nom = {a["id"]: a["nombre"] for a in atletas_pool} if atletas_pool else {}  
+            dict_nom = {a["id"]: a["nombre"] for a in atletas_pool if "id" in a and "nombre" in a} if atletas_pool else {}  
             atletas_finales = []  
 
             if tipo_filtro == "Categoría Etaria":  
                 cat_sel = st.selectbox("Seleccione la Categoría Etaria:", options=categorias_disponibles if categorias_disponibles else ["Cargando categorías activos..."], key="piz_selectbox_cat")  
                 if categorias_disponibles:  
-                    atletas_finales = [a for a in atletas_pool if calcular_categoria_competencia(a["fecha_nacimiento"])[0] == cat_sel]  
+                    atletas_finales = [a for a in atletas_pool if a.get("fecha_nacimiento") and calcular_categoria_competencia(a["fecha_nacimiento"])[0] == cat_sel]  
             elif tipo_filtro == "Atletas Específicos":  
                 ids_sel = st.multiselect("Seleccione Nadador(es) Individual(es):", options=list(dict_nom.keys()), format_func=lambda x: dict_nom.get(x, "Cargando atleta..."), key="piz_multiselect_atletas")  
                 if ids_sel:  
-                    atletas_finales = [a for a in atletas_pool if a["id"] in ids_sel]  
+                    atletas_finales = [a for a in atletas_pool if a.get("id") in ids_sel]  
             else:  
                 atletas_finales = atletas_pool  
 
             if tipo_filtro == "Atletas Específicos" and not atletas_finales:  
-                st.info("💡 Despliega el selector de arriba y marca al menos un nadador para habilitar el botón de consolidation.")  
+                st.info("💡 Despliega el selector de arriba y marca al menos un nadador para habilitar el botón de consolidación.")  
             else:  
                 st.success(f"🎯 Grupo confirmado para imputación: {len(atletas_finales)} atleta(s).")  
 
@@ -221,6 +249,8 @@ def renderizar_tab_pizarra(datos_sidebar):
             # 4. CONSOLIDACIÓN E IMPUTACIÓN HISTÓRICA EN BITÁCORA
             # =============================================================================
             st.markdown("#### 💾 Consolidar y Registrar Jornada")  
+
+            ctx_supabase = supabase if supabase else st.session_state.get("supabase_client")
 
             if st.button("💾 Consolidar Metros e Intensidades por Atleta", type="primary", use_container_width=True, key="btn_consolidar_piz"):  
                 if atletas_finales:  
@@ -266,7 +296,7 @@ def renderizar_tab_pizarra(datos_sidebar):
             st.info("💡 Diseña bloques en el formulario superior para inicializar la sesión del día.")  
 
     # =========================================================================
-    # SUB-PESTAÑA 2: HISTORIAL Y DISTRIBUCIÓN FISIOLÓGICA
+    # SUB-PESTAÑA 2: HISTORIAL Y DISTRIBUCIÓN FISIOLÓGICA (RESOLUCIÓN CACHÉ)
     # =========================================================================
     with subtab_reportes:  
         st.markdown("### 📊 Historial y Distribución de Rutinas Consolidadas")  
@@ -275,17 +305,40 @@ def renderizar_tab_pizarra(datos_sidebar):
         ctx_supabase_rep = supabase if supabase else st.session_state.get("supabase_client")  
 
         if ctx_supabase_rep:  
-            es_entrenador_rep = st.session_state.get("rol") == "Entrenador"  
-            entrenador_id_rep = st.session_state.get("usuario_id")  
-            
+            # RESOLUCIÓN AISLADA PARA HISTORIAL
+            user_raw_rep = (
+                st.session_state.get("usuario_logueado_id")
+                or st.session_state.get("usuario_id")
+                or st.session_state.get("user")
+            )
+            if isinstance(user_raw_rep, dict):
+                id_usuario_logueado_rep = user_raw_rep.get("id") or user_raw_rep.get("usuario_id")
+            else:
+                id_usuario_logueado_rep = user_raw_rep
+
+            rol_real_rep = st.session_state.get("rol_real", st.session_state.get("rol", "Nadador"))
+            rol_activo_rep = st.session_state.get("rol", "Nadador")
+
             permitir_consulta_rep = True  
             ids_autorizados_rep = []  
 
-            if es_entrenador_rep:  
-                if entrenador_id_rep:  
-                    resp_asig_rep = ctx_supabase_rep.table("asignaciones").select("atleta_id").eq("entrenador_id", entrenador_id_rep).execute()  
-                    if resp_asig_rep.data:  
-                        ids_autorizados_rep = [reg["atleta_id"] for reg in resp_asig_rep.data]  
+            if rol_activo_rep == "Entrenador":  
+                id_entrenador_evaluar_rep = None
+                if rol_real_rep == "Administrador":
+                    id_entrenador_evaluar_rep = st.session_state.get("sb_entrenador_simular_selector")
+                else:
+                    id_entrenador_evaluar_rep = id_usuario_logueado_rep
+
+                if id_entrenador_evaluar_rep is not None:  
+                    raw_asig = obtener_atletas_asignados_cache(id_entrenador_evaluar_rep) or []
+                    for item in raw_asig:
+                        if isinstance(item, dict):
+                            val = item.get("atleta_id") or item.get("id") or item.get("usuario_id")
+                            if val is not None:
+                                ids_autorizados_rep.append(val)
+                        elif item is not None:
+                            ids_autorizados_rep.append(item)
+
                     if not ids_autorizados_rep:  
                         permitir_consulta_rep = False  
                 else:  
@@ -302,7 +355,7 @@ def renderizar_tab_pizarra(datos_sidebar):
 
                     query_records = ctx_supabase_rep.table("bitacora_entrenamientos").select("fecha, identificador_carril, metros_totales, desglose_estilos, desglose_intensidad, implementos_usados, atleta_id, pizarra_original").gte("fecha", str(f_desde)).lte("fecha", str(f_hasta))  
                     
-                    if es_entrenador_rep and ids_autorizados_rep:  
+                    if rol_activo_rep == "Entrenador" and ids_autorizados_rep:  
                         query_records = query_records.in_("atleta_id", ids_autorizados_rep)  
                         
                     resp_bib = query_records.order("fecha", desc=True).execute()  
@@ -361,8 +414,6 @@ def renderizar_tab_pizarra(datos_sidebar):
                                         st.caption("🚨 _Nota: Cargar esta rutina borrará las series que estás editando hoy._")
                                         
                                     if st.button(label_boton, key=f"btn_tpl_{fecha_sesion}_{carril_sesion}", type=color_tipo, use_container_width=True):  
-                                        
-                                        # ✨ SOLUCIÓN AL ERROR: Almacenamos el cambio en variables puentes de override
                                         st.session_state["piz_fecha_override"] = datetime.date.today()
                                         st.session_state["piz_carril_override"] = carril_sesion
 

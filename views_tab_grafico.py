@@ -67,6 +67,7 @@ def renderizar_tab_grafico(datos_sidebar):
     m_wa_b = float(datos_sidebar.get("m_wa_b", 0.0))
     m_wa_a = float(datos_sidebar.get("m_wa_a", 0.0))
     m_wr = float(datos_sidebar.get("m_wr", 0.0))
+    
     # =====================================================================
     # 3. RECOPILACIÓN DE DATOS Y MOTOR MATEMÁTICO (INDIVIDUAL)
     # =====================================================================

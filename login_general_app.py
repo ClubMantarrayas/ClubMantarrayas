@@ -5,6 +5,7 @@ import hmac
 import random
 import time
 import os
+
 # 📦 IMPORTACIÓN DIRECTA DESDE TU LIBRERÍA REAL DE FUNCIONES
 from formulas_lib_funciones import (
     calcular_categoria_competencia,
@@ -22,19 +23,16 @@ def aplicar_fondo_pantalla_institucional(
   """Lee una imagen desde la raíz del proyecto, la convierte a Base64 e inyecta CSS
   seguro en stApp con velo agua fresco y centrado vertical/horizontal.
   """
-  # Verificar que el archivo existe en la raíz
   if os.path.exists(nombre_archivo_imagen):
     with open(nombre_archivo_imagen, "rb") as f:
       data_imagen = f.read()
     encoded_imagen = base64.b64encode(data_imagen).decode()
 
-    # Determinamos la extensión del archivo para el MIME tipo
     ext = nombre_archivo_imagen.split(".")[-1].lower()
     mime_type = "png" if ext == "png" else "jpeg"
 
     css_fondo = f"""
         <style>
-        /* Aplicar el fondo con un velo Azul Agua muy claro y luminoso (Frescura marina) */
         .stApp {{
             background-image: linear-gradient(135deg, rgba(186, 230, 253, 0.70), rgba(207, 250, 254, 0.82)), url("data:image/{mime_type};base64,{encoded_imagen}");
             background-size: cover;
@@ -43,13 +41,11 @@ def aplicar_fondo_pantalla_institucional(
             background-attachment: fixed;
         }}
         
-        /* Contenedor principal: bajar un poco más verticalmente */
         .block-container {{
             padding-top: 3.5rem !important;
             max-width: 1100px !important;
         }}
 
-        /* Tarjeta del formulario limpia, blanca con ligera transparencia y bordes suaves */
         [data-testid="stForm"] {{
             background-color: rgba(255, 255, 255, 0.96) !important;
             border-radius: 16px;
@@ -58,7 +54,6 @@ def aplicar_fondo_pantalla_institucional(
             border: 1.5px solid rgba(103, 232, 249, 0.8);
         }}
 
-        /* Garantizar que los botones siempre capturen el puntero */
         button {{
             pointer-events: auto !important;
             z-index: 99999 !important;
@@ -66,11 +61,10 @@ def aplicar_fondo_pantalla_institucional(
         </style>
         """
     st.markdown(css_fondo, unsafe_allow_html=True)
-  else:
-    pass
+
 
 # ============================================================
-# ⚙️ CONEXIÓN GLOBAL CACHEADA (A nivel raíz del archivo)
+# ⚙️ CONEXIÓN GLOBAL CACHEADA
 # ============================================================
 @st.cache_resource
 def obtener_cliente_supabase():
@@ -78,21 +72,22 @@ def obtener_cliente_supabase():
 
 
 # ============================================================
-# 🧹 PURGA DE SEGURIDAD (CONSERVA SOLO LA INFRAESTRUCTURA)
+# 🧹 PURGA DE SEGURIDAD
 # ============================================================
 def limpiar_sesion_al_autenticar():
-  LLAVES_INFRAESTRUCTURA = {"puente_validado", "supabase"}
+  # Preservar llaves clave de infraestructura y configuración global
+  LLAVES_INFRAESTRUCTURA = {"puente_validado", "supabase", "club_seleccionado"}
 
   for key in list(st.session_state.keys()):
     if key not in LLAVES_INFRAESTRUCTURA:
       del st.session_state[key]
 
-# 1. Obtener el nombre del club desde st.secrets (con un valor de respaldo opcional)
-CLUB_DESDE_SECRETS = st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
 
-# 2. Inicializar en session_state si aún no existe
+# Inicialización de club en session_state
+CLUB_DESDE_SECRETS = st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
 if "club_seleccionado" not in st.session_state or not st.session_state.club_seleccionado:
     st.session_state["club_seleccionado"] = CLUB_DESDE_SECRETS
+
 
 def login_usuario(user, password, client_db):
   try:
@@ -111,9 +106,7 @@ def login_usuario(user, password, client_db):
       user_data = response.data[0]
 
       if user_data.get("estatus") == "Inactivo":
-        st.error(
-            "⚠️  Aún no puedes ingresar. Debes contactar con la administración."
-        )
+        st.error("⚠️ Aún no puedes ingresar. Debes contactar con la administración.")
         return False
 
       limpiar_sesion_al_autenticar()
@@ -144,9 +137,7 @@ def login_usuario(user, password, client_db):
         st.session_state.edad_comp_atleta = ed_c
         st.session_state.nadador_seleccionado_id = user_data["id"]
         st.session_state.nadador_seleccionado_nombre = user_data["nombre"]
-        st.session_state.nadador_seleccionado_genero = user_data.get(
-            "genero", "F"
-        )
+        st.session_state.nadador_seleccionado_genero = user_data.get("genero", "F")
         st.session_state.nadador_seleccionado_categoria = cat
       else:
         st.session_state.categoria_atleta = None
@@ -164,308 +155,257 @@ def login_usuario(user, password, client_db):
 
 
 def mostrar_pantalla_login():
-  """Función principal que renderiza el Login, Certificación por Pre-Alta (OTP) y
-  Recuperación.
-  """
-  aplicar_fondo_pantalla_institucional(
-      "Fondo_de_pantalla_Swimprojecttraining.png"
-  )
+  """Función principal que renderiza el Login, Certificación por Pre-Alta (OTP) y Recuperación."""
+  
+  # 🛡️ 1. GUARD DE SALIDA TEMPRANA
+  # Si el usuario ya está autenticado, salir inmediatamente para evitar parpadeos o renders innecesarios.
+  if st.session_state.get("autenticado", False):
+    return
+
+  aplicar_fondo_pantalla_institucional("Fondo_de_pantalla_Swimprojecttraining.png")
+
   if "rec_codigo_verificacion" not in st.session_state:
     st.session_state.rec_codigo_verificacion = None
   if "rec_datos_temporales" not in st.session_state:
     st.session_state.rec_datos_temporales = None
 
-  if "supabase" not in st.session_state:
-    st.session_state.supabase = None
-  if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-
-  if not st.session_state.supabase:
+  if "supabase" not in st.session_state or not st.session_state.supabase:
     try:
       st.session_state.supabase = create_client(
           st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]
       )
     except Exception as e:
-      st.error(
-          f"❌ Error de infraestructura al conectar base de datos local: {e}"
-      )
+      st.error(f"❌ Error de infraestructura al conectar base de datos local: {e}")
       st.stop()
 
   # ------------------------------------------------------------
   # 2. INTERFAZ CENTRADA Y BALANCEADA
   # ------------------------------------------------------------
-  if not st.session_state.autenticado:
-    nombre_club = st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
-    
-    # Encabezado Centralizado Superior
-    st.markdown(
-        f"<h2 style='text-align: center; color: #0F172A; margin-bottom: 2px;'>🏊‍♂️ {nombre_club}</h2>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<h4 style='text-align: center; color: #475569; margin-bottom: 25px;'>Sistema de Control de"
-        " Entrenamientos y Rendimiento</h4>",
-        unsafe_allow_html=True,
-    )
+  nombre_club = st.secrets.get("NOMBRE_CLUB_LOCAL", "Swimming Club")
+  
+  # Encabezado Centralizado Superior
+  st.markdown(
+      f"<h2 style='text-align: center; color: #0F172A; margin-bottom: 2px;'>🏊‍♂️ {nombre_club}</h2>",
+      unsafe_allow_html=True,
+  )
+  st.markdown(
+      "<h4 style='text-align: center; color: #475569; margin-bottom: 25px;'>Sistema de Control de"
+      " Entrenamientos y Rendimiento</h4>",
+      unsafe_allow_html=True,
+  )
 
-    instancia_supabase_club = st.session_state.supabase
+  instancia_supabase_club = st.session_state.supabase
 
-    # Estructura de columnas centrada vertical y horizontalmente
-    col_izq, col_centro, col_der = st.columns([1, 2.2, 1])
+  col_izq, col_centro, col_der = st.columns([1, 2.2, 1])
 
-    with col_centro:
-      tab_login, tab_registro_otp, tab_recuperar = st.tabs([
-          "🔑 Iniciar Sesión",
-          "📝 Registro (Pre-Alta OTP)",
-          "🔄 Recuperar Contraseña",
-      ])
+  with col_centro:
+    tab_login, tab_registro_otp, tab_recuperar = st.tabs([
+        "🔑 Iniciar Sesión",
+        "📝 Registro (Pre-Alta OTP)",
+        "🔄 Recuperar Contraseña",
+    ])
 
-      # --- TAB LOGIN ---
-      with tab_login:
-        st.caption("Nota: Los nombres de usuario se procesan en minúsculas.")
-        with st.form("form_login"):
-          usuario_input = st.text_input("Usuario:")
-          usuario_lower = usuario_input.lower()
-          contrasena_input = st.text_input("Contraseña:", type="password")
+    # --- TAB LOGIN ---
+    with tab_login:
+      st.caption("Nota: Los nombres de usuario se procesan en minúsculas.")
+      with st.form("form_login"):
+        usuario_input = st.text_input("Usuario:")
+        usuario_lower = usuario_input.lower()
+        contrasena_input = st.text_input("Contraseña:", type="password")
 
-          if st.form_submit_button("Ingresar", use_container_width=True):
-            if login_usuario(
-                usuario_lower, contrasena_input, instancia_supabase_club
-            ):
-              st.success("Acceso autorizado.")
-              st.rerun()
-              st.stop()
-            else:
-              st.error(
-                  "Credenciales incorrectas o cuenta en revisión. Verifique sus"
-                  " datos."
-              )
+        if st.form_submit_button("Ingresar", use_container_width=True):
+          if login_usuario(
+              usuario_lower, contrasena_input, instancia_supabase_club
+          ):
+            # 🚀 TRANSICIÓN LIMPIA: Rerun inmediato sin st.success() intermediario ni st.stop()
+            st.rerun()
+          else:
+            st.error(
+                "Credenciales incorrectas o cuenta en revisión. Verifique sus datos."
+            )
 
-# --- TAB ÚNICO DE REGISTRO: CERTIFICACIÓN DE PRE-ALTA VIA OTP ---
-      with tab_registro_otp:
-        st.markdown("### 📝 Registro de Usuarios (Pre-Alta)")
-        st.caption(
-            "Introduce el código OTP enviado por el club para verificar tus"
-            " datos institucionales y activar tu cuenta."
+    # --- TAB REGISTRO PRE-ALTA OTP ---
+    with tab_registro_otp:
+      st.markdown("### 📝 Registro de Usuarios (Pre-Alta)")
+      st.caption(
+          "Introduce el código OTP enviado por el club para verificar tus"
+          " datos institucionales y activar tu cuenta."
+      )
+
+      with st.form("form_activar_prealta"):
+        otp_token_input = st.text_input(
+            "Código OTP (6 dígitos):", max_chars=6, placeholder="Ej: 489123"
+        )
+        email_prealta_input = st.text_input(
+            "Correo electrónico registrado en la pre-alta:"
         )
 
-        with st.form("form_activar_prealta"):
-          otp_token_input = st.text_input(
-              "Código OTP (6 dígitos):", max_chars=6, placeholder="Ej: 489123"
-          )
-          email_prealta_input = st.text_input(
-              "Correo electrónico registrado en la pre-alta:"
-          )
+        st.markdown("---")
+        st.markdown("##### 🔐 Credenciales y Acceso Definitivo")
+        nuevo_alias_pa = st.text_input(
+            "Nombre de Usuario (Alias) deseado:",
+            placeholder="ej: alberto_jordan",
+        )
+        nueva_clave_pa = st.text_input("Establecer Contraseña:", type="password")
+        confirmar_clave_pa = st.text_input("Confirmar Contraseña:", type="password")
 
-          st.markdown("---")
-          st.markdown("##### 🔐 Credenciales y Acceso Definitivo")
-          nuevo_alias_pa = st.text_input(
-              "Nombre de Usuario (Alias) deseado:",
-              placeholder="ej: alberto_jordan",
-          )
-          nueva_clave_pa = st.text_input(
-              "Establecer Contraseña:", type="password"
-          )
-          confirmar_clave_pa = st.text_input(
-              "Confirmar Contraseña:", type="password"
-          )
-
-          if st.form_submit_button(
-              "🚀 Certificar y Activar Cuenta", use_container_width=True
+        if st.form_submit_button("🚀 Certificar y Activar Cuenta", use_container_width=True):
+          if (
+              not otp_token_input
+              or not email_prealta_input
+              or not nuevo_alias_pa
+              or not nueva_clave_pa
           ):
-            if (
-                not otp_token_input
-                or not email_prealta_input
-                or not nuevo_alias_pa
-                or not nueva_clave_pa
-            ):
-              st.error("⚠️ Todos los campos son obligatorios.")
-            elif nueva_clave_pa != confirmar_clave_pa:
-              st.error("❌ Las contraseñas no coinciden.")
-            else:
-              try:
-                email_clean = email_prealta_input.strip().lower()
-                alias_clean = nuevo_alias_pa.strip().lower()
+            st.error("⚠️ Todos los campos son obligatorios.")
+          elif nueva_clave_pa != confirmar_clave_pa:
+            st.error("❌ Las contraseñas no coinciden.")
+          else:
+            try:
+              email_clean = email_prealta_input.strip().lower()
+              alias_clean = nuevo_alias_pa.strip().lower()
 
-                # 1. Validar el token en la tabla invitaciones
-                res_inv = (
-                    instancia_supabase_club.table("invitaciones")
-                    .select("*")
-                    .eq("token", otp_token_input.strip())
-                    .eq("email", email_clean)
-                    .eq("usado", False)
-                    .execute()
+              res_inv = (
+                  instancia_supabase_club.table("invitaciones")
+                  .select("*")
+                  .eq("token", otp_token_input.strip())
+                  .eq("email", email_clean)
+                  .eq("usado", False)
+                  .execute()
+              )
+
+              if not res_inv.data:
+                st.error("❌ Código OTP inválido, expirado o el correo no coincide.")
+              else:
+                invitacion = res_inv.data[0]
+                expira_en = datetime.datetime.fromisoformat(
+                    invitacion["expira_en"].replace("Z", "+00:00")
                 )
 
-                if not res_inv.data:
+                if datetime.datetime.now(datetime.timezone.utc) > expira_en:
                   st.error(
-                      "❌ Código OTP inválido, expirado o el correo no coincide."
+                      "⌛ El código OTP ha expirado (vigencia de 24 horas)."
+                      " Solicite uno nuevo a la administración."
                   )
                 else:
-                  invitacion = res_inv.data[0]
-                  expira_en = datetime.datetime.fromisoformat(
-                      invitacion["expira_en"].replace("Z", "+00:00")
-                  )
-
-                  if datetime.datetime.now(datetime.timezone.utc) > expira_en:
-                    st.error(
-                        "⌛ El código OTP ha expirado (vigencia de 24 horas)."
-                        " Solicite uno nuevo a la administración."
-                    )
-                  else:
-                    # 2. Verificar que el alias deseado no esté en uso por otro usuario
-                    res_alias = (
-                        instancia_supabase_club.table("usuarios")
-                        .select("id")
-                        .eq("usuario", alias_clean)
-                        .execute()
-                    )
-                    if res_alias.data:
-                      st.error(
-                          f"❌ El alias de usuario **{alias_clean}** ya está registrado. Por favor elija otro."
-                      )
-                    else:
-                      # 3. ACTUALIZAR el usuario existente en la tabla 'usuarios'
-                      payload_actualizacion = {
-                          "usuario": alias_clean,
-                          "contrasena": hash_password(nueva_clave_pa),
-                          "estatus": "Activo"
-                      }
-
-                      instancia_supabase_club.table("usuarios").update(
-                          payload_actualizacion
-                      ).eq("email", email_clean).execute()
-
-                      # 4. Marcar la invitación como usada
-                      instancia_supabase_club.table("invitaciones").update(
-                          {"usado": True}
-                      ).eq("id", invitacion["id"]).execute()
-
-                      st.success(
-                          f"🎉 ¡Activación completada exitosamente para"
-                          f" **{invitacion.get('nombre')}**! Ya puedes iniciar sesión con tu usuario **{alias_clean}**."
-                      )
-              except Exception as pa_err:
-                st.error(f"Error al procesar la activación: {pa_err}")
-
-      # --- TAB RECUPERAR ---
-      with tab_recuperar:
-        st.markdown("### Restablecer Contraseña")
-        if st.session_state.rec_codigo_verificacion:
-          st.info(
-              "Se ha enviado un código de seguridad a la dirección vinculada."
-          )
-          with st.form("form_verificacion_recuperacion"):
-            codigo_rec_ingresado = st.text_input(
-                "Ingrese el código temporal de recuperación:"
-            )
-
-            if st.form_submit_button(
-                "Validar Código y Cambiar Contraseña", use_container_width=True
-            ):
-              if str(codigo_rec_ingresado).strip() == str(
-                  st.session_state.rec_codigo_verificacion
-              ):
-                try:
-                  datos = st.session_state.rec_datos_temporales
-                  instancia_supabase_club.table("usuarios").update(
-                      {"contrasena": datos["nueva_contrasena"]}
-                  ).eq("id", datos["user_id"]).execute()
-                  st.success(
-                      "✅ Contraseña actualizada correctamente. Ya puede"
-                      " iniciar sesión."
-                  )
-                  st.session_state.rec_codigo_verificacion = None
-                  st.session_state.rec_datos_temporales = None
-                except Exception as rec_err:
-                  st.error(f"Error al actualizar la contraseña: {rec_err}")
-              else:
-                st.error("❌ El código ingresado es incorrecto.")
-
-          if st.button("❌ Cancelar Recuperación", use_container_width=True):
-            st.session_state.rec_codigo_verificacion = None
-            st.session_state.rec_datos_temporales = None
-            st.rerun()
-        else:
-          with st.form("form_recuperacion"):
-            rec_usuario = st.text_input("Nombre de Usuario (Alias):")
-            rec_email = st.text_input("Correo Electrónico Asociado:")
-            nueva_clave = st.text_input(
-                "Nueva Contraseña Deseada:", type="password"
-            )
-            confirmar_clave = st.text_input(
-                "Confirmar Nueva Contraseña:", type="password"
-            )
-
-            if st.form_submit_button(
-                "🔄 Solicitar Código de Recuperación", use_container_width=True
-            ):
-              if not (
-                  rec_usuario and rec_email and nueva_clave and confirmar_clave
-              ):
-                st.error(
-                    "Todos los campos del formulario de recuperación son"
-                    " obligatorios."
-                )
-              elif nueva_clave != confirmar_clave:
-                st.error(
-                    "La confirmación no coincide con la nueva contraseña"
-                    " introducida."
-                )
-              else:
-                rec_usuario_clean = rec_usuario.strip().lower()
-                try:
-                  verificacion = (
+                  res_alias = (
                       instancia_supabase_club.table("usuarios")
-                      .select("id, estatus, nombre")
-                      .eq("usuario", rec_usuario_clean)
-                      .eq("email", rec_email.strip())
+                      .select("id")
+                      .eq("usuario", alias_clean)
                       .execute()
                   )
-                  if verificacion.data:
-                    user_info = verificacion.data[0]
-                    if user_info.get("estatus") in ["Suspendido", "Bloqueado"]:
-                      st.error(
-                          "Esta cuenta se encuentra suspendida o bloqueada por"
-                          " la administración."
-                      )
-                    else:
-                      codigo_rec_temp = random.randint(100000, 999999)
-                      st.session_state.rec_datos_temporales = {
-                          "user_id": user_info["id"],
-                          "nueva_contrasena": hash_password(nueva_clave),
-                      }
-
-                      cuerpo_rec_mail = (
-                          f"Hola {user_info['nombre']},\n\nHas solicitado un"
-                          " restablecimiento de contraseña. Tu código de"
-                          f" seguridad temporal es: {codigo_rec_temp}\n\nSi no"
-                          " realizaste esta acción, contacta de inmediato al"
-                          " administrador."
-                      )
-                      if enviar_email(
-                          "Código de Seguridad - Recuperación de Contraseña",
-                          cuerpo_rec_mail,
-                          rec_email.strip(),
-                      ):
-                        st.session_state.rec_codigo_verificacion = (
-                            codigo_rec_temp
-                        )
-                        st.success(
-                            "📩 Código de seguridad enviado al correo"
-                            " electrónico."
-                        )
-                        st.rerun()
-                      else:
-                        st.error("Error al enviar el correo de recuperación.")
-                  else:
+                  if res_alias.data:
                     st.error(
-                        "❌ Los datos proporcionados no coinciden con ningún"
-                        " registro activo."
+                        f"❌ El alias de usuario **{alias_clean}** ya está registrado. Por favor elija otro."
                     )
-                except Exception as rec_err:
-                  st.error(
-                      "Error durante el proceso de restablecimiento:"
-                      f" {rec_err}"
-                  )
-    st.stop()
+                  else:
+                    payload_actualizacion = {
+                        "usuario": alias_clean,
+                        "contrasena": hash_password(nueva_clave_pa),
+                        "estatus": "Activo"
+                    }
+
+                    instancia_supabase_club.table("usuarios").update(
+                        payload_actualizacion
+                    ).eq("email", email_clean).execute()
+
+                    instancia_supabase_club.table("invitaciones").update(
+                        {"usado": True}
+                    ).eq("id", invitacion["id"]).execute()
+
+                    st.success(
+                        f"🎉 ¡Activación completada exitosamente para"
+                        f" **{invitacion.get('nombre')}**! Ya puedes iniciar sesión con tu usuario **{alias_clean}**."
+                    )
+            except Exception as pa_err:
+              st.error(f"Error al procesar la activación: {pa_err}")
+
+    # --- TAB RECUPERAR ---
+    with tab_recuperar:
+      st.markdown("### Restablecer Contraseña")
+      if st.session_state.rec_codigo_verificacion:
+        st.info("Se ha enviado un código de seguridad a la dirección vinculada.")
+        with st.form("form_verificacion_recuperacion"):
+          codigo_rec_ingresado = st.text_input(
+              "Ingrese el código temporal de recuperación:"
+          )
+
+          if st.form_submit_button("Validar Código y Cambiar Contraseña", use_container_width=True):
+            if str(codigo_rec_ingresado).strip() == str(
+                st.session_state.rec_codigo_verificacion
+            ):
+              try:
+                datos = st.session_state.rec_datos_temporales
+                instancia_supabase_club.table("usuarios").update(
+                    {"contrasena": datos["nueva_contrasena"]}
+                ).eq("id", datos["user_id"]).execute()
+                st.success(
+                    "✅ Contraseña actualizada correctamente. Ya puede iniciar sesión."
+                )
+                st.session_state.rec_codigo_verificacion = None
+                st.session_state.rec_datos_temporales = None
+              except Exception as rec_err:
+                st.error(f"Error al actualizar la contraseña: {rec_err}")
+            else:
+              st.error("❌ El código ingresado es incorrecto.")
+
+        if st.button("❌ Cancelar Recuperación", use_container_width=True):
+          st.session_state.rec_codigo_verificacion = None
+          st.session_state.rec_datos_temporales = None
+          st.rerun()
+      else:
+        with st.form("form_recuperacion"):
+          rec_usuario = st.text_input("Nombre de Usuario (Alias):")
+          rec_email = st.text_input("Correo Electrónico Asociado:")
+          nueva_clave = st.text_input("Nueva Contraseña Deseada:", type="password")
+          confirmar_clave = st.text_input("Confirmar Nueva Contraseña:", type="password")
+
+          if st.form_submit_button("🔄 Solicitar Código de Recuperación", use_container_width=True):
+            if not (rec_usuario and rec_email and nueva_clave and confirmar_clave):
+              st.error("Todos los campos del formulario de recuperación son obligatorios.")
+            elif nueva_clave != confirmar_clave:
+              st.error("La confirmación no coincide con la nueva contraseña introducida.")
+            else:
+              rec_usuario_clean = rec_usuario.strip().lower()
+              try:
+                verificacion = (
+                    instancia_supabase_club.table("usuarios")
+                    .select("id, estatus, nombre")
+                    .eq("usuario", rec_usuario_clean)
+                    .eq("email", rec_email.strip())
+                    .execute()
+                )
+                if verificacion.data:
+                  user_info = verificacion.data[0]
+                  if user_info.get("estatus") in ["Suspendido", "Bloqueado"]:
+                    st.error("Esta cuenta se encuentra suspendida o bloqueada por la administración.")
+                  else:
+                    codigo_rec_temp = random.randint(100000, 999999)
+                    st.session_state.rec_datos_temporales = {
+                        "user_id": user_info["id"],
+                        "nueva_contrasena": hash_password(nueva_clave),
+                    }
+
+                    cuerpo_rec_mail = (
+                        f"Hola {user_info['nombre']},\n\nHas solicitado un"
+                        " restablecimiento de contraseña. Tu código de"
+                        f" seguridad temporal es: {codigo_rec_temp}\n\nSi no"
+                        " realizaste esta acción, contacta de inmediato al"
+                        " administrador."
+                    )
+                    if enviar_email(
+                        "Código de Seguridad - Recuperación de Contraseña",
+                        cuerpo_rec_mail,
+                        rec_email.strip(),
+                    ):
+                      st.session_state.rec_codigo_verificacion = codigo_rec_temp
+                      st.success("📩 Código de seguridad enviado al correo electrónico.")
+                      st.rerun()
+                    else:
+                      st.error("Error al enviar el correo de recuperación.")
+                else:
+                  st.error("❌ Los datos proporcionados no coinciden con ningún registro activo.")
+              except Exception as rec_err:
+                st.error(f"Error durante el proceso de restablecimiento: {rec_err}")
+
+  # Se frena la ejecución solo si el usuario no está autenticado
+  st.stop()
