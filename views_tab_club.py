@@ -781,7 +781,7 @@ def renderizar_tab_club():
                 
                 tabla_sel_resp = st.selectbox(
                     "Seleccionar Tabla:",
-                    ["usuarios", "invitaciones", "control_pagos", "marcas_historicas", "bitacora_entrenamientos", "documentos_oficiales"],
+                    ["usuarios", "invitaciones", "control_pagos", "marcas_referencia", "marcas_historicas", "catalogo_competencias", "historial_hitos", "bitacora_entrenamientos", "asignaciones", "documentos_oficiales", "plantillas_documentos"],
                     key="select_tabla_individual_resp"
                 )
                 
