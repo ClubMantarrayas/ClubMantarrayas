@@ -77,7 +77,7 @@ from datetime import datetime
 import pandas as pd
 
 
-def parsear_hy3_exacto(archivo_texto):
+def parsear_hy3(archivo_texto):
     resultados = []
     nadador_actual = None
     fecha_competencia_global = datetime.now().strftime("%Y-%m-%d")
