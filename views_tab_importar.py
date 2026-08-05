@@ -210,79 +210,124 @@ def parsear_lenex(archivo_stream):
 def procesar_y_clasificar_marcas(df_crudo, nombre_competencia):
     supabase = st.session_state.supabase
 
-    res_usuarios = supabase.table("usuarios").select("id, nombre, cedula").execute()
+    # Plantilla de usuarios y marcas registradas
+    res_usuarios = (
+        supabase.table("usuarios")
+        .select("id, nombre, cedula, fecha_nacimiento")
+        .execute()
+    )
     usuarios_db = res_usuarios.data if res_usuarios.data else []
 
-    res_marcas = supabase.table("marcas_historicas").select("usuario_id, prueba, tiempo, edad").execute()
+    res_marcas = (
+        supabase.table("marcas_historicas")
+        .select("usuario_id, prueba, tiempo, edad")
+        .execute()
+    )
     marcas_existentes = res_marcas.data if res_marcas.data else []
-    
+
     set_duplicados = {
-        (m["usuario_id"], str(m["prueba"]).strip().lower(), float(m["tiempo"]), float(m["edad"]))
-        for m in marcas_existentes if m["usuario_id"] is not None and m["tiempo"] is not None and m["edad"] is not None
+        (
+            m["usuario_id"],
+            str(m["prueba"]).strip().lower(),
+            float(m["tiempo"]),
+            float(m["edad"]),
+        )
+        for m in marcas_existentes
+        if m["usuario_id"] is not None
+        and m["tiempo"] is not None
+        and m["edad"] is not None
     }
 
-    validos_bd, ui_validos, ui_duplicados, ui_no_encontrados = [], [], [], []
+    validos_bd = []
+    lista_validos, lista_duplicados, lista_no_encontrados = [], [], []
 
     for _, fila in df_crudo.iterrows():
-        nombre_file = fila["Atleta_Limpio"].lower()
-        cedula_file = fila["Cedula"]
+        nombre_file = fila["Atleta_Limpio"]
+        cedula_file = fila["Cedula"] if fila["Cedula"] else "N/A"
+        fecha_nac_file = fila["Fecha_Nacimiento"]
         prueba_norm = normalizar_prueba(fila["Evento"])
         tiempo_sec = convertir_tiempo_a_segundos(fila["Tiempo_Raw"])
-        edad_dec = calcular_edad_decimal(fila["Fecha_Nacimiento"], fila["Fecha_Competencia"])
+        fecha_comp_file = fila["Fecha_Competencia"]
 
+        # Coincidencia en la plantilla
         usuario_match = None
         for u in usuarios_db:
             u_cedula = re.sub(r"[^\d]", "", str(u.get("cedula", "")))
             u_nombre = str(u.get("nombre", "")).strip().lower()
-            
-            # 1. Coincidencia por cédula
-            if cedula_file and u_cedula and cedula_file == u_cedula:
+
+            if (
+                cedula_file != "N/A"
+                and u_cedula
+                and cedula_file == u_cedula
+            ):
                 usuario_match = u
                 break
-            # 2. Coincidencia por nombre o subcadena de nombre
-            if u_nombre and (u_nombre == nombre_file or nombre_file in u_nombre or u_nombre in nombre_file):
+            if u_nombre and (
+                u_nombre == nombre_file.lower()
+                or nombre_file.lower() in u_nombre
+                or u_nombre in nombre_file.lower()
+            ):
                 usuario_match = u
                 break
+
+        # Resolver Fecha de Nacimiento (Archivo -> Base de datos)
+        fecha_nac_definitiva = fecha_nac_file
+        if (
+            not fecha_nac_definitiva or fecha_nac_definitiva == "N/A"
+        ) and usuario_match:
+            fecha_nac_definitiva = usuario_match.get("fecha_nacimiento")
+
+        # Calcular Edad Decimal
+        edad_dec = calcular_edad_decimal(fecha_nac_definitiva, fecha_comp_file)
+
+        # Diccionario único y estandarizado para las 3 tablas UI
+        registro_ui = {
+            "Atleta": usuario_match.get("nombre", nombre_file)
+            if usuario_match
+            else nombre_file,
+            "Cédula": usuario_match.get("cedula", cedula_file)
+            if usuario_match
+            else cedula_file,
+            "Prueba": prueba_norm,
+            "Edad (Decimal)": edad_dec if edad_dec is not None else "N/A",
+            "Tiempo (seg)": tiempo_sec,
+            "Nota": nombre_competencia,
+        }
 
         if not usuario_match:
-            ui_no_encontrados.append({
-                "Atleta": fila["Atleta_Limpio"],
-                "Cédula": cedula_file if cedula_file else "N/A",
-                "Prueba": prueba_norm,
-                "Motivo": "No pertenece a la plantilla del club"
-            })
+            # Tabla 3: No pertenecen al club
+            lista_no_encontrados.append(registro_ui)
         else:
             usr_id = usuario_match["id"]
-            clave_duplicado = (usr_id, prueba_norm.lower(), float(tiempo_sec), float(edad_dec) if edad_dec else 0.0)
+            clave_duplicado = (
+                usr_id,
+                prueba_norm.lower(),
+                float(tiempo_sec),
+                float(edad_dec) if edad_dec is not None else 0.0,
+            )
 
             if clave_duplicado in set_duplicados:
-                ui_duplicados.append({
-                    "Atleta": usuario_match.get("nombre", fila["Atleta_Limpio"]),
-                    "Cédula": usuario_match.get("cedula", cedula_file),
-                    "Prueba": prueba_norm,
-                    "Edad (Decimal)": edad_dec,
-                    "Tiempo (seg)": tiempo_sec,
-                    "Motivo": "Marca ya registrada previamente"
-                })
+                # Tabla 2: Repetidos
+                lista_duplicados.append(registro_ui)
             else:
-                validos_bd.append({
-                    "usuario_id": usr_id,
-                    "prueba": prueba_norm,
-                    "edad": edad_dec,
-                    "tiempo": tiempo_sec,
-                    "nota": nombre_competencia
-                })
-                ui_validos.append({
-                    "Atleta": usuario_match.get("nombre", fila["Atleta_Limpio"]),
-                    "Cédula": usuario_match.get("cedula", cedula_file),
-                    "Prueba": prueba_norm,
-                    "Edad (Decimal)": edad_dec,
-                    "Tiempo (seg)": tiempo_sec,
-                    "Nota": nombre_competencia
-                })
+                # Tabla 1: Admitidos válidos
+                validos_bd.append(
+                    {
+                        "usuario_id": usr_id,
+                        "prueba": prueba_norm,
+                        "edad": edad_dec,
+                        "tiempo": tiempo_sec,
+                        "nota": nombre_competencia,
+                    }
+                )
+                lista_validos.append(registro_ui)
 
-    return validos_bd, pd.DataFrame(ui_validos), pd.DataFrame(ui_duplicados), pd.DataFrame(ui_no_encontrados)
-
+    return (
+        validos_bd,
+        pd.DataFrame(lista_validos),
+        pd.DataFrame(lista_duplicados),
+        pd.DataFrame(lista_no_encontrados),
+    )
 def renderizar_tab_importar():
     st.markdown("### 📥 Importación de Competencias (HY3 / Lenex)")
     archivo_subido = st.file_uploader(
