@@ -115,43 +115,54 @@ def guardar_en_bd(df_procesado, nombre_competencia):
 
 
 def renderizar_tab_importar():
-    st.markdown("### 📥 Importación de Competencias (HY3 / Lenex)")
-    # 1. Actualizado para aceptar nuevos formatos
-    archivo_subido = st.file_uploader("Selecciona el archivo (.hy3, .lxf, .len, .xml)", type=['hy3', 'txt', 'lxf', 'len', 'xml'])
-    
-    if archivo_subido:
-        # 2. Identificar formato
-        extension = archivo_subido.name.split('.')[-1].lower()
-        df = pd.DataFrame()
-        
-        try:
-            if extension == 'hy3':
-                stringio = io.StringIO(archivo_subido.getvalue().decode("utf-8"))
-                df = parsear_hy3(stringio)
-            elif extension in ['lxf', 'len']:
-                df = parsear_lenex(archivo_subido)
-            else:
-                st.error("Formato no soportado.")
-                return
+  st.markdown("### 📥 Importación de Competencias (HY3 / Lenex)")
+  archivo_subido = st.file_uploader(
+      "Selecciona el archivo (.hy3, .lxf, .len, .xml)",
+      type=["hy3", "txt", "lxf", "len", "xml"],
+  )
 
-            if not df.empty:
-                # 3. Conversión de tiempo estandarizada
-                df['Tiempo'] = df['Tiempo'].apply(convertir_hy3_a_segundos)
-                st.success(f"✅ ¡Archivo {extension.upper()} procesado!")
-                st.dataframe(df, use_container_width=True)
-                
-                nombre_comp = st.text_input("Nombre de la Competencia (nota):")
-                if st.button("💾 Validar y Guardar en BD"):
-                    if nombre_comp:
-                        exito, msg = guardar_en_bd(df, nombre_comp)
-                        if exito:
-                            st.success(f"Simulación completa: {msg} registros preparados.")
-                        else:
-                            st.error(f"Error: {msg}")
-                    else:
-                        st.warning("Escribe el nombre de la competencia.")
+  if archivo_subido:
+    extension = archivo_subido.name.split(".")[-1].lower()
+    df = pd.DataFrame()
+
+    try:
+      if extension in ["hy3", "txt"]:
+        # 🔑 CORRECCIÓN PRINCIPAL: Decodificación segura en latin-1 con fallback
+        bytes_data = archivo_subido.getvalue()
+        try:
+          contenido_texto = bytes_data.decode("latin-1")
+        except UnicodeDecodeError:
+          contenido_texto = bytes_data.decode("utf-8", errors="replace")
+
+        stringio = io.StringIO(contenido_texto)
+        df = parsear_hy3(stringio)
+
+      elif extension in ["lxf", "len", "xml"]:
+        df = parsear_lenex(archivo_subido)
+      else:
+        st.error("Formato no soportado.")
+        return
+
+      if not df.empty:
+        df["Tiempo"] = df["Tiempo"].apply(convertir_hy3_a_segundos)
+        st.success(f"✅ ¡Archivo {extension.upper()} procesado!")
+        st.dataframe(df, use_container_width=True)
+
+        nombre_comp = st.text_input("Nombre de la Competencia (nota):")
+        if st.button("💾 Validar y Guardar en BD"):
+          if nombre_comp:
+            exito, msg = guardar_en_bd(df, nombre_comp)
+            if exito:
+              st.success(
+                  f"Simulación completa: {msg} registros preparados e"
+                  " insertados."
+              )
             else:
-                st.error("No se encontraron datos válidos en el archivo.")
-                
-        except Exception as e:
-            st.error(f"Error al procesar el archivo: {e}")
+              st.error(f"Error: {msg}")
+          else:
+            st.warning("Escribe el nombre de la competencia.")
+      else:
+        st.error("No se encontraron datos válidos en el archivo.")
+
+    except Exception as e:
+      st.error(f"Error al procesar el archivo: {e}")
