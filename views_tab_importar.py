@@ -71,45 +71,62 @@ def calcular_edad_decimal(fecha_nacimiento_str, fecha_marca_str):
     except Exception:
         return None
 
-def parsear_hy3(archivo_texto):
+import io
+import re
+from datetime import datetime
+import pandas as pd
+
+
+def parsear_hy3_exacto(archivo_texto):
     resultados = []
     nadador_actual = None
-    fecha_competencia_iso = datetime.now().strftime("%Y-%m-%d")
+    fecha_competencia_global = datetime.now().strftime("%Y-%m-%d")
 
     for linea in archivo_texto:
         if len(linea) < 2:
             continue
         record_type = linea[0:2]
 
-        # B1: Fecha de competencia
+        # B1: Intentar extraer fecha global del evento por si E2 no la trae
         if record_type == "B1":
-            raw_fecha_comp = linea[43:51].strip()
-            if not raw_fecha_comp.isdigit() and len(linea) >= 68:
-                raw_fecha_comp = linea[60:68].strip()
-            if len(raw_fecha_comp) == 8 and raw_fecha_comp.isdigit():
+            match_b1 = re.search(r"(\d{8})", linea[40:70])
+            if match_b1:
+                raw_f = match_b1.group(1)
                 try:
-                    fecha_competencia_iso = datetime.strptime(raw_fecha_comp, "%m%d%Y").strftime("%Y-%m-%d")
+                    fecha_competencia_global = datetime.strptime(
+                        raw_f, "%m%d%Y"
+                    ).strftime("%Y-%m-%d")
                 except ValueError:
                     pass
 
-        # D1: Atleta
+        # D1: Atleta (Estructura: D1M 3215Aguilera ... 33.895.827  18902082011 14 ...)
         elif record_type == "D1":
-            # Extraer sub-cadenas con rangos más amplios y limpiar dígitos pegados al apellido
+            # 1. Apellido y Nombre
             apellido_raw = linea[7:27].strip()
             nombre_raw = linea[27:47].strip()
             nombre_limpio = limpiar_nombre_atleta(nombre_raw, apellido_raw)
 
-            # Búsqueda robusta de cédula en el segmento 45-70 de la línea D1
-            segmento_cedula = linea[45:70]
-            cedula_match = re.search(r"(\d{6,9})", segmento_cedula)
-            cedula_limpia = cedula_match.group(1) if cedula_match else ""
+            # 2. Cédula: Busca el patrón con o sin puntos (ej: 33.895.827)
+            match_cedula = re.search(r"(\d{1,3}(?:\.\d{3}){2}|\d{7,8})", linea)
+            cedula_limpia = (
+                re.sub(r"[^\d]", "", match_cedula.group(1))
+                if match_cedula
+                else ""
+            )
 
-            # Extraer fecha de nacimiento (8 dígitos MMDDYYYY antes de la edad/sexo)
-            fecha_nac_raw = linea[67:75].strip()
+            # 3. Fecha Nacimiento: Buscar los 8 dígitos MMDDYYYY justo después de la cédula y los 3 dígitos internos
+            # Ejemplo: "33.895.827      18902082011" -> Captura "02082011"
             fecha_nac_iso = None
-            if len(fecha_nac_raw) == 8 and fecha_nac_raw.isdigit():
+            match_nac = re.search(
+                r"\d{7,8}\s+\d{3}(\d{8})", re.sub(r"\.", "", linea)
+            )
+
+            if match_nac:
+                raw_nac = match_nac.group(1)
                 try:
-                    fecha_nac_iso = datetime.strptime(fecha_nac_raw, "%m%d%Y").strftime("%Y-%m-%d")
+                    fecha_nac_iso = datetime.strptime(
+                        raw_nac, "%m%d%Y"
+                    ).strftime("%Y-%m-%d")
                 except ValueError:
                     pass
 
@@ -117,25 +134,45 @@ def parsear_hy3(archivo_texto):
                 "nombre_limpio": nombre_limpio,
                 "cedula": cedula_limpia,
                 "fecha_nacimiento_iso": fecha_nac_iso,
-                "fecha_competencia_iso": fecha_competencia_iso
             }
 
         # E1: Evento
         elif record_type == "E1" and nadador_actual:
             nadador_actual["evento_actual"] = linea[18:24].strip()
 
-        # E2: Tiempo
-        elif record_type == "E2" and nadador_actual and nadador_actual.get("evento_actual"):
+        # E2: Tiempo y Fecha específica de la carrera (ej: 12062025 al final de la línea)
+        elif (
+            record_type == "E2"
+            and nadador_actual
+            and nadador_actual.get("evento_actual")
+        ):
             tiempo_raw = linea[5:15].strip()
+
+            # Extraer fecha específica de la prueba desde la línea E2 (ej: 12062025)
+            fecha_carrera_iso = fecha_competencia_global
+            match_fecha_e2 = re.search(r"(\d{8})\s+\d+\s+\d+$", linea.strip())
+            if match_fecha_e2:
+                raw_e2 = match_fecha_e2.group(1)
+                try:
+                    fecha_carrera_iso = datetime.strptime(
+                        raw_e2, "%m%d%Y"
+                    ).strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+
             if tiempo_raw:
-                resultados.append({
-                    "Atleta_Limpio": nadador_actual["nombre_limpio"],
-                    "Cedula": nadador_actual["cedula"],
-                    "Fecha_Nacimiento": nadador_actual["fecha_nacimiento_iso"],
-                    "Fecha_Competencia": nadador_actual["fecha_competencia_iso"],
-                    "Evento": nadador_actual["evento_actual"],
-                    "Tiempo_Raw": tiempo_raw,
-                })
+                resultados.append(
+                    {
+                        "Atleta_Limpio": nadador_actual["nombre_limpio"],
+                        "Cedula": nadador_actual["cedula"],
+                        "Fecha_Nacimiento": nadador_actual[
+                            "fecha_nacimiento_iso"
+                        ],
+                        "Fecha_Competencia": fecha_carrera_iso,
+                        "Evento": nadador_actual["evento_actual"],
+                        "Tiempo_Raw": tiempo_raw,
+                    }
+                )
             nadador_actual["evento_actual"] = None
 
     return pd.DataFrame(resultados)
