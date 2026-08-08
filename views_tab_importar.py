@@ -5,6 +5,9 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+# ==========================================
+# 1. FUNCIONES DE LIMPIEZA Y TRANSFORMACIÓN
+# ==========================================
 MAPEO_PRUEBAS = {
     "50A": "50 Libre", "100A": "100 Libre", "200A": "200 Libre", "400A": "400 Libre",
     "800A": "800 Libre", "1500A": "1500 Libre", "50B": "50 Espalda", "100B": "100 Espalda",
@@ -20,15 +23,10 @@ def normalizar_prueba(codigo):
     return MAPEO_PRUEBAS.get(codigo_limpio, codigo_limpio)
 
 def limpiar_texto_nombre(texto):
-    """Elimina números, caracteres especiales e iniciales sueltas de un texto de nombre/apellido."""
     if not texto:
         return ""
-    # 1. Quitar cualquier dígito (ej: '5Aguilera' -> 'Aguilera')
     texto_sin_numeros = re.sub(r"\d+", "", texto)
-    # 2. Quitar caracteres que no sean letras o espacios
     texto_limpio = re.sub(r"[^\w\s]", "", texto_sin_numeros, flags=re.UNICODE)
-    
-    # 3. Excluir iniciales sueltas de 1 sola letra al final (ej: 'Maria A' -> 'Maria')
     partes = texto_limpio.strip().split()
     if partes and len(partes[-1]) == 1 and partes[-1].isalpha():
         partes.pop()
@@ -60,120 +58,69 @@ def convertir_tiempo_a_segundos(valor):
         return round((minutos * 60) + segundos + (centesimas / 100), 2)
     return 0.0
 
-def calcular_edad_decimal(fecha_nacimiento_str, fecha_marca_str):
-    if not fecha_nacimiento_str or not fecha_marca_str:
-        return None
-    try:
-        fecha_nac_obj = datetime.fromisoformat(fecha_nacimiento_str).date() if isinstance(fecha_nacimiento_str, str) else fecha_nacimiento_str
-        fecha_marca_obj = datetime.fromisoformat(fecha_marca_str).date() if isinstance(fecha_marca_str, str) else fecha_marca_str
-        diferencia_dias = (fecha_marca_obj - fecha_nac_obj).days
-        return round(diferencia_dias / 365.25, 2)
-    except Exception:
-        return None
-
-import io
-import re
-from datetime import datetime
-import pandas as pd
-
-
+# ==========================================
+# 2. PARSERS (Solo extracción de datos)
+# ==========================================
 def parsear_hy3(archivo_texto):
     resultados = []
+    nadadores_procesados = {} # INTEGRACIÓN: Diccionario para unificar bloques D1 duplicados (leadoffs)
     nadador_actual = None
-    fecha_competencia_global = datetime.now().strftime("%Y-%m-%d")
 
     for linea in archivo_texto:
         if len(linea) < 2:
             continue
         record_type = linea[0:2]
 
-        # B1: Intentar extraer fecha global del evento por si E2 no la trae
-        if record_type == "B1":
-            match_b1 = re.search(r"(\d{8})", linea[40:70])
-            if match_b1:
-                raw_f = match_b1.group(1)
-                try:
-                    fecha_competencia_global = datetime.strptime(
-                        raw_f, "%m%d%Y"
-                    ).strftime("%Y-%m-%d")
-                except ValueError:
-                    pass
-
-        # D1: Atleta (Estructura: D1M 3215Aguilera ... 33.895.827  18902082011 14 ...)
-        elif record_type == "D1":
-            # 1. Apellido y Nombre
+        if record_type == "D1":
             apellido_raw = linea[7:27].strip()
             nombre_raw = linea[27:47].strip()
             nombre_limpio = limpiar_nombre_atleta(nombre_raw, apellido_raw)
 
-            # 2. Cédula: Busca el patrón con o sin puntos (ej: 33.895.827)
             match_cedula = re.search(r"(\d{1,3}(?:\.\d{3}){2}|\d{7,8})", linea)
-            cedula_limpia = (
-                re.sub(r"[^\d]", "", match_cedula.group(1))
-                if match_cedula
-                else ""
-            )
+            cedula_limpia = re.sub(r"[^\d]", "", match_cedula.group(1)) if match_cedula else ""
 
-            # 3. Fecha Nacimiento: Buscar los 8 dígitos MMDDYYYY justo después de la cédula y los 3 dígitos internos
-            # Ejemplo: "33.895.827      18902082011" -> Captura "02082011"
-            fecha_nac_iso = None
-            match_nac = re.search(
-                r"\d{7,8}\s+\d{3}(\d{8})", re.sub(r"\.", "", linea)
-            )
+            # Clave única para agrupar (cédula, o nombre si falla la cédula)
+            id_nadador = cedula_limpia if cedula_limpia else nombre_limpio
 
+            match_nac = re.search(r"(\d{8})\s+(\d{1,2})\b", linea)
+            fecha_nac_raw = None
+            edad_entera = None
+            
             if match_nac:
                 raw_nac = match_nac.group(1)
+                edad_entera = int(match_nac.group(2))
                 try:
-                    fecha_nac_iso = datetime.strptime(
-                        raw_nac, "%m%d%Y"
-                    ).strftime("%Y-%m-%d")
+                    fecha_nac_raw = datetime.strptime(raw_nac, "%m%d%Y").strftime("%Y-%m-%d")
                 except ValueError:
                     pass
 
-            nadador_actual = {
-                "nombre_limpio": nombre_limpio,
-                "cedula": cedula_limpia,
-                "fecha_nacimiento_iso": fecha_nac_iso,
+            info_nadador = {
+                "Atleta_Limpio": nombre_limpio,
+                "Cedula": cedula_limpia,
+                "Edad_Entera_Raw": edad_entera,
+                "Fecha_Nac_Raw": fecha_nac_raw,
             }
 
-        # E1: Evento
+            # INTEGRACIÓN: Si el nadador ya fue leído (ej. prueba leadoff), reutilizamos su perfil
+            if id_nadador in nadadores_procesados:
+                nadador_actual = nadadores_procesados[id_nadador]
+            else:
+                nadadores_procesados[id_nadador] = info_nadador
+                nadador_actual = nadadores_procesados[id_nadador]
+
         elif record_type == "E1" and nadador_actual:
-            nadador_actual["evento_actual"] = linea[18:24].strip()
+            codigo_prueba = linea[18:24].strip()
+            # INTEGRACIÓN: Se limpia el sufijo "L" de los relevos aquí para que el normalizador no falle
+            codigo_limpio = re.sub(r"L$", "", codigo_prueba.split()[0])
+            nadador_actual["Evento"] = codigo_limpio
 
-        # E2: Tiempo y Fecha específica de la carrera (ej: 12062025 al final de la línea)
-        elif (
-            record_type == "E2"
-            and nadador_actual
-            and nadador_actual.get("evento_actual")
-        ):
+        elif record_type == "E2" and nadador_actual and nadador_actual.get("Evento"):
             tiempo_raw = linea[5:15].strip()
-
-            # Extraer fecha específica de la prueba desde la línea E2 (ej: 12062025)
-            fecha_carrera_iso = fecha_competencia_global
-            match_fecha_e2 = re.search(r"(\d{8})\s+\d+\s+\d+$", linea.strip())
-            if match_fecha_e2:
-                raw_e2 = match_fecha_e2.group(1)
-                try:
-                    fecha_carrera_iso = datetime.strptime(
-                        raw_e2, "%m%d%Y"
-                    ).strftime("%Y-%m-%d")
-                except ValueError:
-                    pass
-
             if tiempo_raw:
-                resultados.append(
-                    {
-                        "Atleta_Limpio": nadador_actual["nombre_limpio"],
-                        "Cedula": nadador_actual["cedula"],
-                        "Fecha_Nacimiento": nadador_actual[
-                            "fecha_nacimiento_iso"
-                        ],
-                        "Fecha_Competencia": fecha_carrera_iso,
-                        "Evento": nadador_actual["evento_actual"],
-                        "Tiempo_Raw": tiempo_raw,
-                    }
-                )
-            nadador_actual["evento_actual"] = None
+                res = nadador_actual.copy()
+                res["Tiempo_Raw"] = tiempo_raw
+                resultados.append(res)
+            nadador_actual["Evento"] = None
 
     return pd.DataFrame(resultados)
 
@@ -182,11 +129,6 @@ def parsear_lenex(archivo_stream):
     tree = ET.parse(archivo_stream)
     root = tree.getroot()
     resultados = []
-    fecha_competencia_iso = datetime.now().strftime("%Y-%m-%d")
-
-    meet = root.find(".//MEET")
-    if meet is not None and meet.get("startdate"):
-        fecha_competencia_iso = meet.get("startdate")
 
     for athlete in root.findall(".//ATHLETE"):
         nombre_raw = athlete.get("firstname", "")
@@ -199,44 +141,37 @@ def parsear_lenex(archivo_stream):
             resultados.append({
                 "Atleta_Limpio": nombre_limpio,
                 "Cedula": cedula_limpia,
-                "Fecha_Nacimiento": fecha_nac_iso,
-                "Fecha_Competencia": fecha_competencia_iso,
+                "Edad_Entera_Raw": None,
+                "Fecha_Nac_Raw": fecha_nac_iso,
                 "Evento": result.get("event", "Desconocido"),
                 "Tiempo_Raw": result.get("swimtime", "0"),
             })
 
     return pd.DataFrame(resultados)
 
-def procesar_y_clasificar_marcas(df_crudo, nombre_competencia):
+# ==========================================
+# 3. PROCESADOR CENTRAL Y MOTOR HÍBRIDO
+# ==========================================
+def procesar_y_clasificar_marcas(df_crudo, nombre_competencia, fecha_inicio_comp_obj):
     supabase = st.session_state.supabase
 
-    # Plantilla de usuarios y marcas registradas
-    res_usuarios = (
-        supabase.table("usuarios")
-        .select("id, nombre, cedula, fecha_nacimiento")
-        .execute()
-    )
+    res_usuarios = supabase.table("usuarios").select("id, nombre, cedula, fecha_nacimiento").execute()
     usuarios_db = res_usuarios.data if res_usuarios.data else []
 
-    res_marcas = (
-        supabase.table("marcas_historicas")
-        .select("usuario_id, prueba, tiempo, edad")
-        .execute()
-    )
+    res_marcas = supabase.table("marcas_historicas").select("usuario_id, prueba, tiempo, edad").execute()
     marcas_existentes = res_marcas.data if res_marcas.data else []
 
-    set_duplicados = {
-        (
-            m["usuario_id"],
-            str(m["prueba"]).strip().lower(),
-            float(m["tiempo"]),
-            float(m["edad"]),
-        )
-        for m in marcas_existentes
-        if m["usuario_id"] is not None
-        and m["tiempo"] is not None
-        and m["edad"] is not None
-    }
+    marcas_por_usuario = {}
+    for m in marcas_existentes:
+        uid = m.get("usuario_id")
+        if uid:
+            if uid not in marcas_por_usuario:
+                marcas_por_usuario[uid] = []
+            marcas_por_usuario[uid].append({
+                "prueba": str(m["prueba"]).strip().lower() if m["prueba"] else "",
+                "tiempo": float(m["tiempo"]) if m["tiempo"] is not None else 0.0,
+                "edad": float(m["edad"]) if m["edad"] is not None else 0.0
+            })
 
     validos_bd = []
     lista_validos, lista_duplicados, lista_no_encontrados = [], [], []
@@ -244,50 +179,43 @@ def procesar_y_clasificar_marcas(df_crudo, nombre_competencia):
     for _, fila in df_crudo.iterrows():
         nombre_file = fila["Atleta_Limpio"]
         cedula_file = fila["Cedula"] if fila["Cedula"] else "N/A"
-        fecha_nac_file = fila["Fecha_Nacimiento"]
         prueba_norm = normalizar_prueba(fila["Evento"])
         tiempo_sec = convertir_tiempo_a_segundos(fila["Tiempo_Raw"])
-        fecha_comp_file = fila["Fecha_Competencia"]
 
-        # Coincidencia en la plantilla
         usuario_match = None
         for u in usuarios_db:
             u_cedula = re.sub(r"[^\d]", "", str(u.get("cedula", "")))
             u_nombre = str(u.get("nombre", "")).strip().lower()
 
-            if (
-                cedula_file != "N/A"
-                and u_cedula
-                and cedula_file == u_cedula
-            ):
+            if cedula_file != "N/A" and u_cedula and cedula_file == u_cedula:
                 usuario_match = u
                 break
-            if u_nombre and (
-                u_nombre == nombre_file.lower()
-                or nombre_file.lower() in u_nombre
-                or u_nombre in nombre_file.lower()
-            ):
+            if u_nombre and (u_nombre == nombre_file.lower() or nombre_file.lower() in u_nombre or u_nombre in nombre_file.lower()):
                 usuario_match = u
                 break
 
-        # Resolver Fecha de Nacimiento (Archivo -> Base de datos)
-        fecha_nac_definitiva = fecha_nac_file
-        if (
-            not fecha_nac_definitiva or fecha_nac_definitiva == "N/A"
-        ) and usuario_match:
-            fecha_nac_definitiva = usuario_match.get("fecha_nacimiento")
+        edad_dec = None
+        if usuario_match and usuario_match.get("fecha_nacimiento"):
+            try:
+                fn_dt = datetime.strptime(usuario_match["fecha_nacimiento"], "%Y-%m-%d").date()
+                dias_diferencia = (fecha_inicio_comp_obj - fn_dt).days
+                edad_dec = round(dias_diferencia / 365.25, 2)
+            except Exception:
+                edad_dec = None
+        else:
+            if fila.get("Fecha_Nac_Raw"):
+                try:
+                    fn_dt = datetime.strptime(fila["Fecha_Nac_Raw"], "%Y-%m-%d").date()
+                    edad_dec = round((fecha_inicio_comp_obj - fn_dt).days / 365.25, 2)
+                except Exception:
+                    pass
+            
+            if edad_dec is None and pd.notna(fila.get("Edad_Entera_Raw")):
+                edad_dec = round(float(fila["Edad_Entera_Raw"]), 2)
 
-        # Calcular Edad Decimal
-        edad_dec = calcular_edad_decimal(fecha_nac_definitiva, fecha_comp_file)
-
-        # Diccionario único y estandarizado para las 3 tablas UI
         registro_ui = {
-            "Atleta": usuario_match.get("nombre", nombre_file)
-            if usuario_match
-            else nombre_file,
-            "Cédula": usuario_match.get("cedula", cedula_file)
-            if usuario_match
-            else cedula_file,
+            "Atleta": usuario_match.get("nombre", nombre_file) if usuario_match else nombre_file,
+            "Cédula": usuario_match.get("cedula", cedula_file) if usuario_match else cedula_file,
             "Prueba": prueba_norm,
             "Edad (Decimal)": edad_dec if edad_dec is not None else "N/A",
             "Tiempo (seg)": tiempo_sec,
@@ -295,31 +223,33 @@ def procesar_y_clasificar_marcas(df_crudo, nombre_competencia):
         }
 
         if not usuario_match:
-            # Tabla 3: No pertenecen al club
             lista_no_encontrados.append(registro_ui)
         else:
             usr_id = usuario_match["id"]
-            clave_duplicado = (
-                usr_id,
-                prueba_norm.lower(),
-                float(tiempo_sec),
-                float(edad_dec) if edad_dec is not None else 0.0,
-            )
+            
+            es_duplicado = False
+            marcas_hist_usuario = marcas_por_usuario.get(usr_id, [])
+            
+            for m in marcas_hist_usuario:
+                if m["prueba"] == prueba_norm.lower() and m["tiempo"] == float(tiempo_sec):
+                    if edad_dec is not None:
+                        if abs(m["edad"] - edad_dec) <= 0.021:
+                            es_duplicado = True
+                            break
+                    else:
+                        es_duplicado = True
+                        break
 
-            if clave_duplicado in set_duplicados:
-                # Tabla 2: Repetidos
+            if es_duplicado:
                 lista_duplicados.append(registro_ui)
             else:
-                # Tabla 1: Admitidos válidos
-                validos_bd.append(
-                    {
-                        "usuario_id": usr_id,
-                        "prueba": prueba_norm,
-                        "edad": edad_dec,
-                        "tiempo": tiempo_sec,
-                        "nota": nombre_competencia,
-                    }
-                )
+                validos_bd.append({
+                    "usuario_id": usr_id,
+                    "prueba": prueba_norm,
+                    "edad": edad_dec,
+                    "tiempo": tiempo_sec,
+                    "nota": nombre_competencia,
+                })
                 lista_validos.append(registro_ui)
 
     return (
@@ -328,8 +258,16 @@ def procesar_y_clasificar_marcas(df_crudo, nombre_competencia):
         pd.DataFrame(lista_duplicados),
         pd.DataFrame(lista_no_encontrados),
     )
+
+# ==========================================
+# 4. VISTA (UI en Streamlit)
+# ==========================================
 def renderizar_tab_importar():
     st.markdown("### 📥 Importación de Competencias (HY3 / Lenex)")
+    
+    nombre_comp = st.text_input("Nombre de la Competencia (nota):", placeholder="Ej: Campeonato Regional Oriente 2026")
+    fecha_inicio = st.date_input("Fecha de Inicio del Campeonato", datetime.now())
+    
     archivo_subido = st.file_uploader(
         "Selecciona el archivo (.hy3, .lxf, .len, .xml)",
         type=["hy3", "txt", "lxf", "len", "xml"],
@@ -359,10 +297,12 @@ def renderizar_tab_importar():
                 st.error("⚠️ No se encontraron resultados válidos en el archivo.")
                 return
 
-            nombre_comp = st.text_input("Nombre de la Competencia (nota):", placeholder="Ej: Campeonato Regional Oriente 2026")
-
             if nombre_comp:
-                validos_bd, df_validos, df_duplicados, df_no_encontrados = procesar_y_clasificar_marcas(df_crudo, nombre_comp)
+                validos_bd, df_validos, df_duplicados, df_no_encontrados = procesar_y_clasificar_marcas(
+                    df_crudo, 
+                    nombre_comp,
+                    fecha_inicio
+                )
 
                 st.markdown("---")
                 st.subheader(f"1. Registros Válidos a Guardar en BD ({len(df_validos)})")
