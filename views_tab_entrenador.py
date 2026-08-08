@@ -5,23 +5,33 @@ from formulas_lib_funciones import formatear_a_minutos, convertir_string_a_segun
 # Definimos el fragmento reactivo para aislar toda la carga de datos pesados
 @st.fragment
 def contenedor_formulario_entrenador():
-    # 1. Selección de categoría y prueba rápidas
-    u_cat = st.selectbox(
-        "Categoría a Modificar u Organizar:", 
-        options=["Infantil A", "Infantil B", "Juvenil A", "Juvenil B", "Máxima"],
-        key="sb_categoria_entrenador"
-    )
+    # 1. Selección de categoría, género y prueba
+    col_cat, col_gen = st.columns(2)
+    with col_cat:
+        u_cat = st.selectbox(
+            "Categoría a Modificar u Organizar:", 
+            options=["Infantil A", "Infantil B", "Juvenil A", "Juvenil B", "Máxima"],
+            key="sb_categoria_entrenador"
+        )
+    with col_gen:
+        genero_sel = st.selectbox(
+            "Género:",
+            options=["Femenino", "Masculino"],
+            key="sb_genero_entrenador"
+        )
+    
+    # Mapeo a formato de base de datos ('F' / 'M')
+    genero_atleta = "F" if genero_sel == "Femenino" else "M"
     
     lista_pruebas_restringida = obtener_pruebas_por_categoria(u_cat)
     
     titulo_grafico = st.selectbox(
-        f"🏊‍♂️ Seleccione la Prueba para {u_cat}:", 
+        f"🏊‍♂️ Seleccione la Prueba para {u_cat} ({genero_sel}):", 
         options=lista_pruebas_restringida,
         index=1 if len(lista_pruebas_restringida) > 1 else 0,
         key="sb_prueba_entrenador_ingreso"
     )
     
-    genero_atleta = st.session_state.get("nadador_seleccionado_genero", "F")
     es_preinfantil = st.session_state.get("es_preinfantil", False)
 
     # Control de exclusiones
@@ -47,9 +57,9 @@ def contenedor_formulario_entrenador():
     except Exception as e:
         st.caption(f"Nota en precarga: {e}")
 
-    st.caption(f"📋 Configurando tiempos para **{titulo_grafico}** ({'Femenino' if genero_atleta == 'F' else 'Masculino'})")
+    st.caption(f"📋 Configurando tiempos para **{titulo_grafico}** ({genero_sel})")
 
-    # 3. Formulario integrado en el fragmento para que cambie de inmediato al mover los selectboxes
+    # 3. Formulario integrado en el fragmento para que cambie de inmediato al mover los controles
     with st.form("form_update_referencias"):
         st.write("✍️ *Ingrese los tiempos en formato `mm:ss.hh` o segundos decimales*")
         
@@ -81,7 +91,7 @@ def contenedor_formulario_entrenador():
                 if u_waa is not None: up_data_cat["m_wa_a"] = u_waa
                 
                 if up_data_cat or u_wr is not None:
-                    # A. Guardar/actualizar datos específicos de la categoría (reemplaza a upsert)
+                    # A. Guardar/actualizar datos específicos de la categoría
                     if ref_dinamica.data:
                         if up_data_cat:
                             supabase.table("marcas_referencia").update(up_data_cat).eq("prueba", titulo_grafico).eq("genero", genero_atleta).eq("categoria", u_cat).execute()
@@ -100,7 +110,7 @@ def contenedor_formulario_entrenador():
                     if u_wr is not None:
                         supabase.table("marcas_referencia").update({"m_wr": u_wr}).eq("prueba", titulo_grafico).eq("genero", genero_atleta).execute()
                     
-                    st.success(f"🎉 Tiempos procesados y guardados con éxito para la categoría {u_cat}.")
+                    st.success(f"🎉 Tiempos procesados y guardados con éxito para la categoría {u_cat} ({genero_sel}).")
                     st.rerun()
                 else:
                     st.warning("⚠️ No se detectaron cambios numéricos válidos.")
