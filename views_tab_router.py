@@ -16,7 +16,7 @@ from views_tab_importar import renderizar_tab_importar
 from views_tab_marcas import renderizar_tab_marcas
 from views_tab_pizarra import renderizar_tab_pizarra
 from views_tab_reportes import renderizar_tab_reportes
-
+from views_tab_antropometria import renderizar_tab_antropometria
 
 def mostrar_vista_enrutador():
   """Función maestra de inicialización que actúa como 'Director de Orquesta'."""
@@ -91,12 +91,14 @@ def mostrar_vista_enrutador():
   elif rol_usuario in ["Entrenador", "Nadador"]:
     (
         tab_grafico,
+        tab_antropometria,
         tab_pizarra,
         tab_reportes,
         tab_marcas,
         tab_calendario,
     ) = st.tabs([
         "📉 Gráfico de Proyecciones",
+        "📏 Control Antropométrico y WA",
         "📝 Pizarra Diaria",
         "📊 Reportes de Entrenamiento",
         "📋 Resultados de competencias",
@@ -105,6 +107,7 @@ def mostrar_vista_enrutador():
   else:
     (
         tab_grafico,
+        tab_antropometria,
         tab_pizarra,
         tab_reportes,
         tab_marcas,
@@ -114,6 +117,7 @@ def mostrar_vista_enrutador():
         tab_calendario,
     ) = st.tabs([
         "📉 Gráfico de Proyecciones",
+        "📏 Control Antropométrico y WA",
         "📝 Pizarra Diaria",
         "📊 Reportes de Entrenamiento",
         "📋 Resultados de competencias",
@@ -126,6 +130,8 @@ def mostrar_vista_enrutador():
   # Enrutamiento directo a los archivos
   with tab_grafico:
     renderizar_tab_grafico(datos_sidebar)
+  with tab_antropometria:
+    renderizar_tab_antropometria(datos_sidebar)
 
   if not simulacion_externa:
     with tab_pizarra:
