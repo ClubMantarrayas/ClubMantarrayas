@@ -26,7 +26,35 @@ from conections_supabase_cache import (
     obtener_usuarios_por_rol_cache,
 )
 
+def ordenar_atletas_jerarquicamente(lista_atletas):
+  """Ordena atletas por:
 
+  1º Categoría/Edad (Menor a Mayor) 2º Género (Femenino -> Masculino) 3º Nombre
+  alfabético (A -> Z)
+  """
+  if not lista_atletas:
+    return []
+
+  def key_ordenamiento(atleta):
+    if not isinstance(atleta, dict):
+      return (999, "Z", "")
+
+    fn = atleta.get("fecha_nacimiento")
+    # Validación estricta contra None, cadenas vacías o NaN de pandas
+    if pd.isna(fn) or not fn:
+      edad = 999
+    else:
+      try:
+        _, edad = calcular_categoria_competencia(fn)
+      except Exception:
+        edad = 999
+
+    genero = str(atleta.get("genero") or "Z").upper()
+    nombre = str(atleta.get("nombre") or "").strip().upper()
+    return (edad, genero, nombre)
+
+  return sorted(lista_atletas, key=key_ordenamiento)
+    
 def renderizar_sidebar_completo():
   """Renderiza el sidebar completo con soporte de emulación para el Administrador."""
   if "supabase" not in st.session_state or st.session_state.supabase is None:
@@ -174,6 +202,9 @@ def renderizar_sidebar_completo():
     st.sidebar.subheader("🎯 Panel de Navegación de Atletas")
     try:
       atletas_disponibles = obtener_nadadores_activos_cache() or []
+      # 🧬 ORDENAMIENTO JERÁRQUICO
+      atletas_disponibles = ordenar_atletas_jerarquicamente(atletas_disponibles)
+
       if atletas_disponibles:
         df_atl = pd.DataFrame(atletas_disponibles)
         dict_atletas = dict(zip(df_atl["id"], df_atl["nombre"]))
@@ -235,7 +266,9 @@ def renderizar_sidebar_completo():
               key="sb_entrenador_simular_selector",
           )
         else:
-          st.sidebar.warning("⚠️ No hay entrenadores registrados en la tabla de usuarios.")
+          st.sidebar.warning(
+              "⚠️ No hay entrenadores registrados en la tabla de usuarios."
+          )
 
       # CASO B: Entrenador Real en su sesión
       else:
@@ -272,6 +305,11 @@ def renderizar_sidebar_completo():
             )
             in set_ids_asignados
         ]
+
+        # 🧬 ORDENAMIENTO JERÁRQUICO
+        atletas_disponibles = ordenar_atletas_jerarquicamente(
+            atletas_disponibles
+        )
 
         if atletas_disponibles:
           df_atl = pd.DataFrame(atletas_disponibles)
@@ -312,6 +350,8 @@ def renderizar_sidebar_completo():
       spc()
       st.sidebar.subheader("🏊‍♂️ Selección de Nadador a Simular")
       atletas_disponibles = obtener_nadadores_activos_cache() or []
+      # 🧬 ORDENAMIENTO JERÁRQUICO
+      atletas_disponibles = ordenar_atletas_jerarquicamente(atletas_disponibles)
 
       if atletas_disponibles:
         df_atl = pd.DataFrame(atletas_disponibles)
@@ -354,7 +394,6 @@ def renderizar_sidebar_completo():
       st.session_state["nadador_seleccionado_categoria"] = (
           st.session_state.get("categoria_atleta", "")
       )
-
   # -------------------------------------------------------------
   # 4. SELECCIÓN DE PRUEBA
   # -------------------------------------------------------------
@@ -802,6 +841,7 @@ def renderizar_sidebar_completo():
   # -------------------------------------------------------------
   return {
       "usuario_id": st.session_state.get("nadador_seleccionado_id"),
+      "fecha_nacimiento": st.session_state.get("nadador_seleccionado_fecha_nacimiento", "2014-12-30"),
       "genero": st.session_state.get("nadador_seleccionado_genero", "M"),
       "nombre": st.session_state.get("nadador_seleccionado_nombre", "Atleta"),
       "categoria": st.session_state.get("nadador_seleccionado_categoria", ""),
